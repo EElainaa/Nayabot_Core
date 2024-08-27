@@ -51,7 +51,7 @@ lazy_static!{
 }
 
 fn main(){
-    //printinf(MessageBuilder::new().at(114514).text("1919810").image("wudust.png"));
+    //正向ws
     // 连接到url并调用闭包
     if let Err(_error) = connect("ws://192.168.1.38:3001", |sender| {
         let bot=Bot::new(sender.clone());

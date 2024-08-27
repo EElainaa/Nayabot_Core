@@ -101,6 +101,15 @@ pub struct Forward{
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct Video{
+    pub file:String,
+    file_id:String,
+    file_size:String,
+    path:String,
+    pub url:String
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Rstatus{
     pub status:String,
     retcode:i32,
