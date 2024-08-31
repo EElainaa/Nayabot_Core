@@ -3,7 +3,7 @@ use rusqlite::Connection;
 use serde_json::Value;
 use colored::Colorize;
 
-use crate::bot::{At, Forward, Image, Json, Mface, MsgData, Text};
+use crate::bot::{At, Forward, Image, Json, Mface, MsgData, Text, Video};
 
 pub fn array_to_string(array:&Vec<Value>)->String{
     let mut ostr=String::new();
@@ -17,7 +17,7 @@ pub fn array_to_string(array:&Vec<Value>)->String{
             "reply"=>{}//暂时咕咕咕
             "json"=>{let data:Json=serde_json::from_value(m.data).unwrap();ostr=ostr.clone()+&data.data}
             "forward"=>{let data:Forward=serde_json::from_value(m.data).unwrap();ostr=ostr.clone()+"[转发消息:"+&data.id+"]"}
-            "video"=>{let data:Image=serde_json::from_value(m.data).unwrap();ostr=ostr.clone()+"[视频:"+&data.url+"]"}
+            "video"=>{let data:Video=serde_json::from_value(m.data).unwrap();ostr=ostr.clone()+"[视频:"+&data.url+"]"}
             _=>{println!("{}",m.r#type);println!("{}",m.data)}
         }
     });
