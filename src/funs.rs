@@ -1,5 +1,4 @@
 use chrono::{DateTime, FixedOffset};
-use rusqlite::Connection;
 use serde_json::Value;
 use colored::Colorize;
 
@@ -38,8 +37,4 @@ pub fn printerr<T: std::fmt::Display>(s:T){
 
 pub fn printwrm<T: std::fmt::Display>(s:T){
     println!("{} [{}]{}",time_to_string(chrono::Local::now().timestamp()),"Wrm".yellow(),s)
-}
-
-pub fn getdata_sql()->Connection{
-    Connection::open("data.sql").unwrap()
 }
