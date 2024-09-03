@@ -1,11 +1,11 @@
 //onebot v11
 use std::{fmt::Display, net::TcpStream};
-
-use serde::{Deserialize, Serialize};
-use serde_json::{Number, Value};
 use tungstenite::{client, stream::MaybeTlsStream, Message, WebSocket};
+use crate::event::*;
 
-use crate::event::lifecycle_event;
+
+pub struct BotHttp{}
+pub struct BotRHrrp{}
 
 #[allow(dead_code)]
 pub struct BotWebsocket{
@@ -16,7 +16,7 @@ pub struct BotWebsocket{
 }
 
 impl BotWebsocket {
-    pub fn new_ws<T:Display>(url:T)->Result<BotWebsocket,String>{
+    pub fn new<T:Display>(url:T)->Result<BotWebsocket,String>{
         match client::connect(url.to_string()){
             Ok(mut ws)=>{
                 match ws.0.read() {
@@ -53,7 +53,7 @@ impl BotSend for BotWebsocket {
         match self.ws.write(Message::text(string)){
             Ok(())=>{
                 match self.ws.flush() {
-                    Ok(())=>{Ok(return Ok((self.ws.read().unwrap().to_string())))}
+                    Ok(())=>{return Ok(self.ws.read().unwrap().to_string())}
                     Err(err)=>{return Err(err.to_string())}
                 }
             }
@@ -64,13 +64,18 @@ impl BotSend for BotWebsocket {
 }
 
 impl BotWebsocket {
-    pub fn get_status(&mut self)->Result<String, String>{
+    pub async fn send_private_msg<T:Display>(&mut self,id:&i64,s:T)->Result<(),String>{
+        send_private_msg(self, id, s)
+    }
+    pub async fn get_status(&mut self)->Result<echo_get_status, String>{
         get_status(self)
     }
-    pub fn get_version_info(&mut self)->Result<String, String>{
+    pub async fn get_version_info(&mut self)->Result<String, String>{
         get_version_info(self)
     }
 }
+
+pub struct BotRWebsocket{}
 
 /*
 #[allow(dead_code)]
@@ -114,11 +119,15 @@ impl Bot {
     pub fn clean_cache(&self)->Result<(), ws::Error>{self.sender.send(format!("{{\"action\": \"clean_cache\"}}"))}
 }*/
 
+fn send_private_msg<B:BotSend,T:Display>(bot:&mut B,id:&i64,s:T)->Result<(), String>{
+    bot.send(format!("{{\"action\": \"send_private_msg\",\"params\": {{\"user_id\":{},\"message\":{}}}}}",id,s))
+}
+
 //获取bot状态
-fn get_status<T:BotSend>(bot:&mut T)->Result<String, String>{
+fn get_status<T:BotSend>(bot:&mut T)->Result<echo_get_status, String>{
     match bot.send_with_recive(format!("{{\"action\": \"get_status\"}}")){
         Ok(res)=>{
-            Ok(res)
+            Ok(serde_json::from_value::<echo_get_status>(serde_json::from_str::<echo_event>(res.as_str()).unwrap().data).unwrap())
         }
         Err(err)=>{Err(err)}
     }
@@ -133,95 +142,4 @@ fn get_version_info<T:BotSend>(bot:&mut T)->Result<String, String>{
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct MsgData{
-    pub data:Value,
-    pub r#type:String
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Text{
-    pub text:String
-}
-
-#[allow(non_snake_case)]
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Image{
-    pub file:String,
-    pub file_id:String,
-    file_size:String,
-    subType:Number,
-    pub url:String
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Mface{//表情包
-    emoji_id:String,
-    emoji_package_id:String,
-    key:String,
-    pub summary:String,
-    url:String
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct At{
-    pub name:String,
-    pub qq:String
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Json{
-    pub data:String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Forward{
-    content:Value,
-    pub id:String
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Video{
-    pub file:String,
-    file_id:String,
-    file_size:String,
-    path:String,
-    pub url:String
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Rstatus{//api执行结果
-    pub status:String,
-    retcode:i32,
-    data:Value,
-    message:Value,
-    pub wording:String,
-    echo:Value
-}
-
-pub struct MessageBuilder{
-    msg:Value
-}
-
-#[allow(dead_code)]
-impl MessageBuilder {
-    pub fn new()->MessageBuilder{MessageBuilder{msg:Value::Array(vec![])}}
-    pub fn build(self)->Value{self.msg}
-    pub fn text<T:ToString>(mut self,s:T)->MessageBuilder{self.msg.as_array_mut().unwrap().push(serde_json::json!({"type": "text","data": {"text": s.to_string()}}));self}
-    pub fn face<T:ToString>(mut self,s:T)->MessageBuilder{self.msg.as_array_mut().unwrap().push(serde_json::json!({"type": "face","data": {"id": s.to_string()}}));self}
-    pub fn image<T:ToString>(mut self,s:T)->MessageBuilder{self.msg.as_array_mut().unwrap().push(serde_json::json!({"type": "image","data": {"file": s.to_string()}}));self}
-    pub fn record<T:ToString>(mut self,s:T)->MessageBuilder{self.msg.as_array_mut().unwrap().push(serde_json::json!({"type": "record","data": {"file": s.to_string()}}));self}
-    pub fn video<T:ToString>(mut self,s:T)->MessageBuilder{self.msg.as_array_mut().unwrap().push(serde_json::json!({"type": "video","data": {"file": s.to_string()}}));self}
-    pub fn at<T:ToString>(mut self,s:T)->MessageBuilder{self.msg.as_array_mut().unwrap().push(serde_json::json!({"type": "at","data": {"qq": s.to_string()}}));self}
-    pub fn rps<T:ToString>(mut self)->MessageBuilder{self.msg.as_array_mut().unwrap().push(serde_json::json!({"type": "rps"}));self}
-    pub fn reply<T:ToString>(mut self,s:T)->MessageBuilder{self.msg.as_array_mut().unwrap().push(serde_json::json!({"type": "reply","data": {"id": s.to_string()}}));self}
-    pub fn forward<T:ToString>(mut self,s:T)->MessageBuilder{self.msg.as_array_mut().unwrap().push(serde_json::json!({"type": "forward","data": {"id": s.to_string()}}));self}
-}
-
-impl Display for MessageBuilder {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let json=format!("{}",serde_json::json!(self.msg));
-        write!(f,"{}", json)
-    }
-}
 

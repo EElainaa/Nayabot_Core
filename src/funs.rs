@@ -2,7 +2,7 @@ use chrono::{DateTime, FixedOffset};
 use serde_json::Value;
 use colored::Colorize;
 
-use crate::bot::{At, Forward, Image, Json, Mface, MsgData, Text, Video};
+use crate::message::*;
 
 pub fn array_to_string(array:&Vec<Value>)->String{
     let mut ostr=String::new();
