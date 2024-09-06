@@ -1,76 +1,108 @@
 //onebot v11
-use std::{fmt::Display, net::TcpStream};
-use tungstenite::{client, stream::MaybeTlsStream, Message, WebSocket};
-use crate::event::*;
+use std::{fmt::Display, net::TcpStream, sync::{Arc, Mutex}};
+use crate::{event::*, funs::printinf};
+use tungstenite::{stream::MaybeTlsStream, Message, WebSocket};
 
+type WS=Arc<Mutex<WebSocket<MaybeTlsStream<TcpStream>>>>;
 
 pub struct BotHttp{}
 pub struct BotRHrrp{}
 
-#[allow(dead_code)]
+#[derive(Debug)]
 pub struct BotWebsocket{
     url:String,
     id:i64,
-    name:String,
-    ws:WebSocket<MaybeTlsStream<TcpStream>>
+    ws:WS
 }
 
 impl BotWebsocket {
     pub fn new<T:Display>(url:T)->Result<BotWebsocket,String>{
-        match client::connect(url.to_string()){
-            Ok(mut ws)=>{
-                match ws.0.read() {
-                    Ok(a)=>{
-                        let bot_info:lifecycle_event = serde_json::from_str(a.to_string().as_str()).unwrap();
-                        Ok(BotWebsocket{url:url.to_string(), id:bot_info.self_id, name: 1.to_string(), ws: ws.0 })
+        match tungstenite::client::connect(url.to_string()) {
+            Ok((mut ws,_resp)) =>{
+                match ws.read() {
+                    Ok(s)=>{
+                        let lifecycle_event:lifecycle_event=serde_json::from_str(s.to_string().as_str()).unwrap();
+                        return Ok(BotWebsocket{
+                            url:url.to_string(),
+                            id: lifecycle_event.self_id,
+                            ws: Arc::new(Mutex::new(ws))
+                        })
                     }
-                    Err(err)=>{return Err(err.to_string())}
+                    Err(err)=>{
+                        return Err(err.to_string())
+                    }
                 }
             }
-            Err(err)=>{Err(err.to_string())}
+            Err(err) => return Err(err.to_string()),
         }
+    }
+    pub fn get_ws(&self) -> WS {
+        self.ws.clone()
     }
 }
 
 trait BotSend {
     fn send(&mut self,string:String)->Result<(),String>;
     fn send_with_recive(&mut self,string:String)->Result<String,String>;
+    async fn send_async(&mut self,string:String)->Result<(),String>;
+    async fn send_with_recive_async(&mut self,string:String)->Result<String,String>;
 }
 
 impl BotSend for BotWebsocket {
     fn send(&mut self,string:String)->Result<(),String> {
-        match self.ws.write(Message::text(string)){
-            Ok(())=>{
-                match self.ws.flush() {
-                Ok(())=>{Ok(())}
-                Err(err)=>{Err(err.to_string())}
-            }}
+        match self.get_ws().lock().unwrap().send(Message::text(string)){
+            Ok(_)=>{printinf("success");
+                Ok(())
+            }
             Err(err)=>{Err(err.to_string())}
         }
     }
     
     fn send_with_recive(&mut self,string:String)->Result<String,String> {
-        match self.ws.write(Message::text(string)){
-            Ok(())=>{
-                match self.ws.flush() {
-                    Ok(())=>{return Ok(self.ws.read().unwrap().to_string())}
-                    Err(err)=>{return Err(err.to_string())}
+        match self.send(string){
+            Ok(_)=>{
+                match self.ws.lock().unwrap().read() {
+                    Ok(s) => {
+                        Ok(s.to_string())
+                    }
+                    Err(err) => return Err(err.to_string())
                 }
             }
             Err(err)=>{Err(err.to_string())}
         }
     }
-
+    
+    async fn send_async(&mut self,string:String)->Result<(),String> {
+        match self.ws.lock().unwrap().send(Message::text(string)){
+            Ok(_)=>{Ok(())}
+            Err(err)=>{Err(err.to_string())}
+        }
+    }
+    
+    async fn send_with_recive_async(&mut self,string:String)->Result<String,String> {
+        match self.ws.lock().unwrap().send(Message::text(string)){
+            Ok(_)=>{
+                match self.ws.lock().unwrap().read() {
+                    Ok(s) => {
+                        printinf(&s);
+                        Ok(s.to_string())
+                    }
+                    Err(err) => return Err(err.to_string())
+                }
+            }
+            Err(err)=>{Err(err.to_string())}
+        }
+    }
 }
 
 impl BotWebsocket {
-    pub async fn send_private_msg<T:Display>(&mut self,id:&i64,s:T)->Result<(),String>{
+    pub fn send_private_msg<T:Display>(&mut self,id:&i64,s:T)->Result<(),String>{
         send_private_msg(self, id, s)
     }
-    pub async fn get_status(&mut self)->Result<echo_get_status, String>{
+    pub fn get_status(&mut self)->Result<echo_get_status, String>{
         get_status(self)
     }
-    pub async fn get_version_info(&mut self)->Result<String, String>{
+    pub fn get_version_info(&mut self)->Result<echo_get_version_info, String>{
         get_version_info(self)
     }
 }
@@ -120,23 +152,24 @@ impl Bot {
 }*/
 
 fn send_private_msg<B:BotSend,T:Display>(bot:&mut B,id:&i64,s:T)->Result<(), String>{
-    bot.send(format!("{{\"action\": \"send_private_msg\",\"params\": {{\"user_id\":{},\"message\":{}}}}}",id,s))
+    return bot.send(format!("{{\"action\": \"send_private_msg\",\"params\": {{\"user_id\":{},\"message\":{}}}}}",id,s))
 }
 
 //获取bot状态
 fn get_status<T:BotSend>(bot:&mut T)->Result<echo_get_status, String>{
     match bot.send_with_recive(format!("{{\"action\": \"get_status\"}}")){
         Ok(res)=>{
+            printinf("send successly");
             Ok(serde_json::from_value::<echo_get_status>(serde_json::from_str::<echo_event>(res.as_str()).unwrap().data).unwrap())
         }
         Err(err)=>{Err(err)}
     }
 }
 
-fn get_version_info<T:BotSend>(bot:&mut T)->Result<String, String>{
+fn get_version_info<T:BotSend>(bot:&mut T)->Result<echo_get_version_info, String>{
     match bot.send_with_recive(format!("{{\"action\": \"get_version_info\"}}")){
         Ok(res)=>{
-            Ok(res)
+            Ok(serde_json::from_value::<echo_get_version_info>(serde_json::from_str::<echo_event>(res.as_str()).unwrap().data).unwrap())
         }
         Err(err)=>{Err(err)}
     }
