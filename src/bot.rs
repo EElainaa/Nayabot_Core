@@ -1,5 +1,5 @@
 //onebot v11
-use std::{collections::HashMap, fmt::Display, net::TcpStream, sync::{Arc, Mutex}, thread::{self, Thread}};
+use std::{collections::HashMap, fmt::Display, net::TcpStream, sync::{Arc, Mutex}, thread::{self, JoinHandle, Thread}};
 use crate::{event::*, funs::{printerr, printinf, printwrm}};
 use serde_json::Value;
 use tungstenite::{stream::MaybeTlsStream, Message, WebSocket};
@@ -59,7 +59,7 @@ impl BotWebsocket{
 #[allow(async_fn_in_trait)]
 pub trait Bot{
     /// 启动一个新线程运行bot
-    fn run(self) -> Thread;
+    fn run(self) -> JoinHandle<()>;
     //fn run_async(self) -> AbortHandle;
     /// 发送消息
     fn send(&mut self,string:&String)->Result<(),String>;
@@ -86,9 +86,9 @@ pub trait Bot{
 
 impl Bot for BotWebsocket {
 
-    fn run(self) -> Thread {
+    fn run(self) -> JoinHandle<()> {
         let bot = self;
-        let handle = thread::spawn(move ||{
+        thread::spawn(move ||{
             loop{
                 match bot.recv_msg(){
                     Ok(str) => {
@@ -132,13 +132,11 @@ impl Bot for BotWebsocket {
                             }
                             _=>{printwrm(format!("未知事件 {}",str))}
                         }
-                        //bot.subscribes[]
                     },
                     Err(err) => printerr(err),
                 }
             }
-        });
-        handle.thread().clone()
+        })
     }
 
     fn send(&mut self,string:&String)->Result<(),String> {
