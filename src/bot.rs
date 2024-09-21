@@ -6,6 +6,7 @@ use tungstenite::{stream::MaybeTlsStream, Message, WebSocket};
 
 type WS=Arc<Mutex<WebSocket<MaybeTlsStream<TcpStream>>>>;
 
+//TODO
 //pub struct BotHttp{}
 //pub struct BotRHttp{}
 //pub struct BotRWebsocket{}
@@ -13,44 +14,6 @@ type WS=Arc<Mutex<WebSocket<MaybeTlsStream<TcpStream>>>>;
 pub trait EventResolve {
     fn run(self,event:Event);
 }
-
-type LifeCycleEventResolve = fn(event:LifecycleEvent);
-type HeartbeatEventResolve = fn(event:HeartbeatEvent);
-type GroupMsgEventResolve = fn(event:GroupMsgEvent);
-type PrivateMsgEventResolve = fn(event:PrivateMsgEvent);
-impl EventResolve for LifeCycleEventResolve {
-    fn run(self,event:Event) {
-        match event.get_lifecycle_event() {
-            Ok(event)=>{self(event)}
-            Err(err)=>{printerr(err)}
-        }
-    }
-}
-impl EventResolve for HeartbeatEventResolve {
-    fn run(self,event:Event) {
-        match event.get_heartbeat_event() {
-            Ok(event)=>{self(event)}
-            Err(err)=>{printerr(err)}
-        }
-    }
-}
-impl EventResolve for GroupMsgEventResolve {
-    fn run(self,event:Event) {
-        match event.get_group_msg_event() {
-            Ok(event)=>{self(event)}
-            Err(err)=>{printerr(err)}
-        }
-    }
-}
-impl EventResolve for PrivateMsgEventResolve {
-    fn run(self,event:Event) {
-        match event.get_private_msg_event() {
-            Ok(event)=>{self(event)}
-            Err(err)=>{printerr(err)}
-        }
-    }
-}
-
 
 pub struct BotWebsocket{
     url:String,
@@ -177,20 +140,6 @@ impl Bot for BotWebsocket {
         });
         handle.thread().clone()
     }
-
-    /*async fn run_async(self) -> AbortHandle {
-        let bot = self;
-        let handle = tokio::spawn(async move ||{
-            loop{
-                match bot.recv_msg(){
-                    Ok(_) => todo!(),
-                    Err(_) => todo!(),
-                }
-            }
-        });
-        handle.await;
-        handle.abort_handle()
-    }*/
 
     fn send(&mut self,string:&String)->Result<(),String> {
         match self.get_ws().lock().unwrap().send(Message::text(string)){
