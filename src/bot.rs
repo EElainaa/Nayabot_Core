@@ -1,7 +1,6 @@
 //onebot v11
-use std::{collections::HashMap, fmt::Display, net::TcpStream, sync::{Arc, Mutex}, thread::{self, JoinHandle, Thread}};
-use crate::{event::*, funs::{printerr, printinf, printwrm}};
-use serde_json::Value;
+use std::{fmt::Display, net::TcpStream, sync::{Arc, Mutex}, thread::{self, JoinHandle}};
+use crate::{event::*, funs::{printerr, printinf}};
 use tungstenite::{stream::MaybeTlsStream, Message, WebSocket};
 
 type WS=Arc<Mutex<WebSocket<MaybeTlsStream<TcpStream>>>>;
@@ -11,15 +10,31 @@ type WS=Arc<Mutex<WebSocket<MaybeTlsStream<TcpStream>>>>;
 //pub struct BotRHttp{}
 //pub struct BotRWebsocket{}
 
-pub trait EventResolve {
-    fn run(self,event:Event);
+pub enum EventResolve<B:Bot> {
+    LifecycleEvent(fn(&mut B,LifecycleEvent)),
+    HeartbeatEvent(fn(&mut B,HeartbeatEvent)),
+    GroupMsgEvent(fn(&mut B,GroupMsgEvent)),
+    PrivateMsgEvent(fn(&mut B,PrivateMsgEvent))
+}
+
+struct Subscribes<B:Bot>{
+    lifecycle_event:Option<fn(&mut B,LifecycleEvent)>,
+    heartbeat_event:Option<fn(&mut B,HeartbeatEvent)>,
+    group_msg_event:Option<fn(&mut B,GroupMsgEvent)>,
+    private_msg_event:Option<fn(&mut B,PrivateMsgEvent)>
+}
+
+impl<B:Bot> Default for Subscribes<B> {
+    fn default() -> Self {
+        Self { lifecycle_event: Default::default(), heartbeat_event: Default::default(), group_msg_event: Default::default(), private_msg_event: Default::default() }
+    }
 }
 
 pub struct BotWebsocket{
     url:String,
     id:i64,
     ws:WS,
-    subscribes:HashMap<String,fn(Event)>
+    subscribes:Subscribes<Self>
 }
 
 impl BotWebsocket{
@@ -34,7 +49,7 @@ impl BotWebsocket{
                             url:url.to_string(),
                             id: lifecycle_event.self_id,
                             ws: Arc::new(Mutex::new(ws)),
-                            subscribes:HashMap::new()
+                            subscribes:Subscribes::<Self>::default()
                         })
                     }
                     Err(err)=>{
@@ -45,31 +60,22 @@ impl BotWebsocket{
             Err(err) => return Err(err.to_string()),
         }
     }
-    pub fn get_ws(&self) -> WS {
-        self.ws.clone()
-    }
-    pub fn get_url(&self) -> String{
-        self.url.clone()
-    }
-    pub fn get_id(&self) -> i64{
-        self.id
-    }
 }
 
-#[allow(async_fn_in_trait)]
-pub trait Bot{
+#[allow(async_fn_in_trait,unused)]
+pub trait Bot where Self:Sized{
     /// 启动一个新线程运行bot
     fn run(self) -> JoinHandle<()>;
     //fn run_async(self) -> AbortHandle;
-    /// 发送消息
+    /// 向协议端发送消息
     fn send(&mut self,string:&String)->Result<(),String>;
-    /// 发送消息并接收返回消息
+    /// 向协议端发送消息并接收返回消息
     fn send_with_recive(&mut self,string:&String)->Result<String,String>;
-    /// 异步发送消息
+    /// 向协议端异步发送消息
     async fn send_async(&mut self,string:&String)->Result<(),String>;
-    /// 异步发送消息并接收返回消息
+    /// 向协议端异步发送消息并接收返回消息
     async fn send_with_recive_async(&mut self,string:&String)->Result<String,String>;
-    /// 接收消息
+    /// 从协议端接收消息
     fn recv_msg(&self)->Result<String,String>;
     /// 订阅一个事件
     /// 
@@ -81,66 +87,63 @@ pub trait Bot{
     /// 
     /// private_msg_event 私聊消息事件
     /// 
-    fn subscribe<T:ToString>(&mut self,t:T,factory:fn(Event))->();
+    fn subscribe(&mut self,factory:EventResolve<Self>)->();
+    /// 发送群聊消息
+    /// 
+    /// 使用JSON格式
+    fn send_group_msg<T:Display>(&mut self,group_id:&i64,s:T)->Result<(),String>;
+    /// 发送私聊消息
+    /// 
+    /// 使用JSON格式
+    fn send_private_msg<T:Display>(&mut self,id:&i64,s:T)->Result<(),String>;
+    /// 获取登录状态
+    fn get_status(&mut self) -> Result<EchoGetStatus, String>;
+    /// 获取协议端版本信息
+    fn get_version_info(&mut self)->Result<EchoGetVersionInfo, String>;
+    /// 获取登录账号信息
+    fn get_login_info(&mut self)->Result<EchoLoginInfo, String>;
 }
 
 impl Bot for BotWebsocket {
-
     fn run(self) -> JoinHandle<()> {
-        let bot = self;
+        let mut bot = self;//别用self
         thread::spawn(move ||{
             loop{
                 match bot.recv_msg(){
-                    Ok(str) => {
-                        let d = serde_json::from_str::<Value>(&str.as_str()).unwrap();
-                        match d.get("post_type").unwrap().to_string().as_str() {
-                            "\"meta_event\""=>{
-                                if let Some(f) = bot.subscribes.get("meta_event") {
-                                    //f()
-                                }else {
-                                    match d.get("meta_event_type").unwrap().to_string().as_str(){
-                                        "\"heartbeat\""=>{
-                                            if let Some(f) = bot.subscribes.get("heartbeat_event") {
-                                                let event:HeartbeatEvent = serde_json::from_str(&str).unwrap();
-                                                f(Event::HeartbeatEvent { event })
-                                            }
-                                        }
-                                        _=>{printwrm(format!("未知meta_event事件 {}",str))}
-                                    }
-                                }
+                Ok(str) => {
+                    match Event::from(&str) {
+                        Ok(Event::LifecycleEvent{event}) => {
+                            if let Some(f) = bot.subscribes.lifecycle_event{
+                                f(&mut bot,event)
                             }
-                            "\"message\""=>{
-                                if let Some(f) = bot.subscribes.get("message") {
-                                    //f()
-                                }else {
-                                    match d.get("message_type").unwrap().to_string().as_str(){
-                                        "\"group\""=>{
-                                            if let Some(f) = bot.subscribes.get("group_msg_event") {
-                                                let event:GroupMsgEvent = serde_json::from_str(&str).unwrap();
-                                                f(Event::GroupMsgEvent { event })
-                                            }
-                                        }
-                                        "\"private\""=>{
-                                            if let Some(f) = bot.subscribes.get("private_msg_event") {
-                                                let event:GroupMsgEvent = serde_json::from_str(&str).unwrap();
-                                                f(Event::GroupMsgEvent { event })
-                                            }
-                                        }
-                                        _=>{printwrm(format!("未知meta_event事件 {}",str))}
-                                    }
-                                }
+                        },
+                        Ok(Event::HeartbeatEvent{event}) => {
+                            if let Some(f) = bot.subscribes.heartbeat_event{
+                                f(&mut bot,event)
                             }
-                            _=>{printwrm(format!("未知事件 {}",str))}
-                        }
-                    },
-                    Err(err) => printerr(err),
+                        },
+                        Ok(Event::GroupMsgEvent{event}) => {
+                            if let Some(f) = bot.subscribes.group_msg_event{
+                                f(&mut bot,event)
+                            }
+                        },
+                        Ok(Event::PrivateMsgEvent{event}) => {
+                            if let Some(f) = bot.subscribes.private_msg_event{
+                                f(&mut bot,event)
+                            }
+                        },
+                        Err(err) => {
+                            printerr(err);
+                            printerr(str)},
+                    }
+                },
+                Err(err) => printerr(err),
                 }
             }
         })
     }
-
     fn send(&mut self,string:&String)->Result<(),String> {
-        match self.get_ws().lock().unwrap().send(Message::text(string)){
+        match self.ws.lock().unwrap().send(Message::text(string)){
             Ok(_)=>{
                 printinf(format!("Send:{}",&string));
                 Ok(())
@@ -148,11 +151,9 @@ impl Bot for BotWebsocket {
             Err(err)=>{Err(err.to_string())}
         }
     }
-    
     fn send_with_recive(&mut self,string:&String)->Result<String,String> {
         match self.send(string){
             Ok(_)=>{
-                printinf(format!("Send:{}",&string));
                 match self.ws.lock().unwrap().read() {
                     Ok(s) => {
                         Ok(s.to_string())
@@ -163,20 +164,17 @@ impl Bot for BotWebsocket {
             Err(err)=>{Err(err.to_string())}
         }
     }
-    
     async fn send_async(&mut self,string:&String)->Result<(),String> {
         match self.ws.lock().unwrap().send(Message::text(string)){
             Ok(_)=>{Ok(())}
             Err(err)=>{Err(err.to_string())}
         }
     }
-    
     async fn send_with_recive_async(&mut self,string:&String)->Result<String,String> {
         match self.ws.lock().unwrap().send(Message::text(string)){
             Ok(_)=>{
                 match self.ws.lock().unwrap().read() {
                     Ok(s) => {
-                        printinf(&s);
                         Ok(s.to_string())
                     }
                     Err(err) => return Err(err.to_string())
@@ -185,30 +183,31 @@ impl Bot for BotWebsocket {
             Err(err)=>{Err(err.to_string())}
         }
     }
-
     fn recv_msg(&self)->Result<String,String>{
-        Ok(self.get_ws().lock().unwrap().read().unwrap().to_string())
+        Ok(self.ws.lock().unwrap().read().unwrap().to_string())
     }
-    fn subscribe<T:ToString>(&mut self,t:T,factory:fn(Event))->() {
-        self.subscribes.insert(t.to_string(), factory);
+    fn subscribe(&mut self,factory:EventResolve<Self>)->() {
+        match factory {
+            EventResolve::LifecycleEvent(f) => self.subscribes.lifecycle_event=Some(f),
+            EventResolve::HeartbeatEvent(f) => self.subscribes.heartbeat_event=Some(f),
+            EventResolve::GroupMsgEvent(f) => self.subscribes.group_msg_event=Some(f),
+            EventResolve::PrivateMsgEvent(f) => self.subscribes.private_msg_event=Some(f),
+        }
     }
-}
-impl BotWebsocket {
-    ///发送私聊消息
-    pub fn send_private_msg<T:Display>(&mut self,id:&i64,s:T)->Result<(),String>{
+    fn send_private_msg<T:Display>(&mut self,id:&i64,s:T)->Result<(),String>{
         send_private_msg(self, id, s)
     }
-    ///获取登录状态
-    pub fn get_status(&mut self)->Result<EchoGetStatus, String>{
+    fn get_status(&mut self)->Result<EchoGetStatus, String>{
         get_status(self)
     }
-    ///获取协议端版本信息
-    pub fn get_version_info(&mut self)->Result<EchoGetVersionInfo, String>{
+    fn get_version_info(&mut self)->Result<EchoGetVersionInfo, String>{
         get_version_info(self)
     }
-    ///获取登录账号信息
-    pub fn get_login_info(&mut self)->Result<EchoLoginInfo, String>{
+    fn get_login_info(&mut self)->Result<EchoLoginInfo, String>{
         get_login_info(self)
+    }
+    fn send_group_msg<T:Display>(&mut self,group_id:&i64,s:T)->Result<(),String> {
+        send_group_msg(self, group_id, s)
     }
 }
 
@@ -251,19 +250,31 @@ impl Bot {
     pub fn clean_cache(&self)->Result<(), ws::Error>{self.sender.send(format!("{{\"action\": \"clean_cache\"}}"))}
 }*/
 fn send_private_msg<B:Bot,T:Display>(bot:&mut B,id:&i64,s:T)->Result<(), String>{
-    bot.send(&format!("{{\"action\": \"send_private_msg\",\"params\": {{\"user_id\":{},\"message\":{}}}}}",id,s))
+    match bot.send_with_recive(&format!("{{\"action\": \"send_private_msg\",\"params\": {{\"user_id\":{},\"message\":{}}}}}",id,s)){
+        Ok(_) => {Ok(())}
+        Err(err) => Err(err),
+    }
 }
 
 fn send_group_msg<B:Bot,T:Display>(bot:&mut B,id:&i64,s:T)->Result<(), String>{
-    bot.send(&format!("{{\"action\": \"send_group_msg\",\"params\": {{\"group_id\":{},\"message\":{}}}}}",id,s))
+    match bot.send_with_recive(&format!("{{\"action\": \"send_group_msg\",\"params\": {{\"group_id\":{},\"message\":{}}}}}",id,s)){
+        Ok(_) => {Ok(())}
+        Err(err) => Err(err),
+    }
 }
 
 fn delete_msg<B:Bot>(bot:&mut B,msg_id:&i64)->Result<(), String>{
-    bot.send(&format!("{{\"action\": \"delete_msg\",\"params\": {{\"message_id\":{}}}}}",msg_id))
+    match bot.send_with_recive(&format!("{{\"action\": \"delete_msg\",\"params\": {{\"message_id\":{}}}}}",msg_id)){
+        Ok(_) => {Ok(())}
+        Err(err) => Err(err),
+    }
 }
 
 fn get_msg<B:Bot>(bot:&mut B,msg_id:&i64)->Result<(), String>{
-    bot.send(&format!("{{\"action\": \"get_msg\",\"params\": {{\"message_id\":{}}}}}",msg_id))
+    match bot.send_with_recive(&format!("{{\"action\": \"get_msg\",\"params\": {{\"message_id\":{}}}}}",msg_id)){
+        Ok(_) => {Ok(())}
+        Err(err) => Err(err),
+    }
 }
 
 fn get_status<T:Bot>(bot:&mut T)->Result<EchoGetStatus, String>{
