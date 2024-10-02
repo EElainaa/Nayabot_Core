@@ -30,30 +30,6 @@ impl Event {
     }
 }
 
-#[derive(Debug,Deserialize)]
-pub(crate) struct PostMessageVivitor{
-    pub post_type:Option<PostType>,
-    pub message_type:Option<MessageType>,
-}
-
-impl Default for PostMessageVivitor {
-    fn default() -> Self {
-        Self { post_type: None, message_type: None}
-    }
-}
-
-#[derive(Debug,Serialize,Deserialize)]
-pub(crate) struct PostMetaVivitor{
-    pub post_type:Option<PostType>,
-    pub meta_event_type:Option<MetaEventType>,
-}
-
-impl Default for PostMetaVivitor {
-    fn default() -> Self {
-        Self { post_type: None, meta_event_type: None}
-    }
-}
-
 #[derive(Debug,Serialize,Deserialize)]
 pub enum PostType {
     #[serde(rename = "message")]
