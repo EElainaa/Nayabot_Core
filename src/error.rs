@@ -4,6 +4,7 @@ pub trait Error {
     fn to_string(&self)->String;
 }
 
+#[derive(Debug)]
 pub struct BotError{
     msg:String
 }

@@ -1,6 +1,6 @@
 use std::{fmt::Display, net::TcpStream, str::FromStr, sync::{Arc, Mutex}, thread::{self, JoinHandle}};
 
-use tungstenite::{handshake::{self, machine::HandshakeMachine}, http::Uri, protocol::WebSocketConfig, stream::MaybeTlsStream, Message, WebSocket};
+use tungstenite::{http::Uri, stream::MaybeTlsStream, Message, WebSocket};
 
 use crate::{bot::*, error::BotError, event::*, funs::*};
 
@@ -33,45 +33,18 @@ impl BotWebsocket{
 
 impl Bot for BotWebsocket {
     fn send(&mut self,string:&String)->Result<(),BotError> {
-        match self.ws.lock().unwrap().send(Message::text(string)){
-            Ok(_)=>{
-                printinf(format!("Send:{}",&string));
-                Ok(())
-            }
-            Err(err)=>{Err(err.to_string().into())}
-        }
+        Ok(self.ws.lock().unwrap().send(Message::text(string))?)
     }
     fn send_with_recive(&mut self,string:&String)->Result<String,BotError> {
-        match self.send(string){
-            Ok(_)=>{
-                match self.ws.lock().unwrap().read() {
-                    Ok(s) => {
-                        Ok(s.to_string())
-                    }
-                    Err(err) => return Err(err.into())
-                }
-            }
-            Err(err)=>{Err(err.into())}
-        }
+        self.send(string)?;
+        Ok(self.ws.lock().unwrap().read()?.to_string())
     }
     async fn send_async(&mut self,string:&String)->Result<(),BotError> {
-        match self.ws.lock().unwrap().send(Message::text(string)){
-            Ok(_)=>{Ok(())}
-            Err(err)=>{Err(err.to_string().into())}
-        }
+        Ok(self.ws.lock().unwrap().send(Message::text(string))?)
     }
     async fn send_with_recive_async(&mut self,string:&String)->Result<String,BotError> {
-        match self.ws.lock().unwrap().send(Message::text(string)){
-            Ok(_)=>{
-                match self.ws.lock().unwrap().read() {
-                    Ok(s) => {
-                        Ok(s.to_string())
-                    }
-                    Err(err) => return Err(err.to_string().into())
-                }
-            }
-            Err(err)=>{Err(err.to_string().into())}
-        }
+        self.ws.lock().unwrap().send(Message::text(string))?;
+        Ok(self.ws.lock().unwrap().read()?.to_string())
     }
     fn recv_msg(&self)->Result<String,String>{
         Ok(self.ws.lock().unwrap().read().unwrap().to_string())

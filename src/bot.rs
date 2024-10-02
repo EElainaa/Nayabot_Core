@@ -119,65 +119,38 @@ impl Bot {
     pub fn clean_cache(&self)->Result<(), ws::Error>{self.sender.send(format!("{{\"action\": \"clean_cache\"}}"))}
 }*/
 pub(crate) fn send_private_msg<B:Bot,T:Display>(bot:&mut B,id:&i64,s:T)->Result<(), BotError>{
-    match bot.send_with_recive(&format!("{{\"action\": \"send_private_msg\",\"params\": {{\"user_id\":{},\"message\":{}}}}}",id,s)){
-        Ok(_) => {Ok(())}
-        Err(err) => Err(err),
-    }
+    bot.send_with_recive(&format!("{{\"action\": \"send_private_msg\",\"params\": {{\"user_id\":{},\"message\":{}}}}}",id,s))?;
+    Ok(())
 }
 
 pub(crate) fn send_group_msg<B:Bot,T:Display>(bot:&mut B,id:&i64,s:T)->Result<(), BotError>{
-    match bot.send_with_recive(&format!("{{\"action\": \"send_group_msg\",\"params\": {{\"group_id\":{},\"message\":{}}}}}",id,s)){
-        Ok(_) => {Ok(())}
-        Err(err) => Err(err),
-    }
+    bot.send_with_recive(&format!("{{\"action\": \"send_group_msg\",\"params\": {{\"group_id\":{},\"message\":{}}}}}",id,s))?;
+    Ok(())
 }
 
 pub(crate) fn delete_msg<B:Bot>(bot:&mut B,msg_id:&i64)->Result<(), BotError>{
-    match bot.send_with_recive(&format!("{{\"action\": \"delete_msg\",\"params\": {{\"message_id\":{}}}}}",msg_id)){
-        Ok(_) => {Ok(())}
-        Err(err) => Err(err),
-    }
+    bot.send_with_recive(&format!("{{\"action\": \"delete_msg\",\"params\": {{\"message_id\":{}}}}}",msg_id))?;
+    Ok(())
 }
 
 pub(crate) fn get_msg<B:Bot>(bot:&mut B,msg_id:&i64)->Result<(), BotError>{
-    match bot.send_with_recive(&format!("{{\"action\": \"get_msg\",\"params\": {{\"message_id\":{}}}}}",msg_id)){
-        Ok(_) => {Ok(())}
-        Err(err) => Err(err),
-    }
+    bot.send_with_recive(&format!("{{\"action\": \"get_msg\",\"params\": {{\"message_id\":{}}}}}",msg_id))?;
+    Ok(())
 }
 
 pub(crate) fn get_status<T:Bot>(bot:&mut T)->Result<EchoGetStatus, BotError>{
-    match bot.send_with_recive(&format!("{{\"action\": \"get_status\"}}")){
-        Ok(res)=>{
-            Ok(serde_json::from_value::<EchoGetStatus>(serde_json::from_str::<EchoEvent>(res.as_str()).unwrap().data).unwrap())
-        }
-        Err(err)=>{Err(err)}
-    }
+    let res = bot.send_with_recive(&format!("{{\"action\": \"get_status\"}}"))?;
+    Ok(serde_json::from_value::<EchoGetStatus>(serde_json::from_str::<EchoEvent>(res.as_str())?.data)?)
 }
 
 pub(crate) fn get_version_info<T:Bot>(bot:&mut T)->Result<EchoGetVersionInfo, BotError>{
-    match bot.send_with_recive(&format!("{{\"action\": \"get_version_info\"}}")){
-        Ok(res)=>{
-            Ok(serde_json::from_value::<EchoGetVersionInfo>(serde_json::from_str::<EchoEvent>(res.as_str()).unwrap().data).unwrap())
-        }
-        Err(err)=>{Err(err)}
-    }
+    let res = bot.send_with_recive(&format!("{{\"action\": \"get_version_info\"}}"))?;
+    Ok(serde_json::from_value::<EchoGetVersionInfo>(serde_json::from_str::<EchoEvent>(res.as_str())?.data)?)
 }
 
 pub(crate) fn get_login_info<T:Bot>(bot:&mut T)->Result<EchoLoginInfo, BotError>{
-    match bot.send_with_recive(&format!("{{\"action\": \"get_login_info\"}}")){
-        Ok(res)=>{
-            match serde_json::from_str::<EchoEvent>(res.as_str()) {
-                Ok(res) => {
-                    match serde_json::from_value::<EchoLoginInfo>(res.data) {
-                        Ok(_) => todo!(),
-                        Err(_) => todo!(),
-                    }
-                },
-                Err(err) => {Err(err.into())},
-            }
-        }
-        Err(err)=>{Err(err)}
-    }
+    let res = bot.send_with_recive(&format!("{{\"action\": \"get_login_info\"}}"))?;
+    let echo_event = serde_json::from_str::<EchoEvent>(res.as_str())?;
+    let login_info = serde_json::from_value::<EchoLoginInfo>(echo_event.data)?;
+    Ok(login_info)
 }
-
