@@ -101,7 +101,7 @@ impl BotAPI for BotWebsocket {
                         }
                     }
                 },
-                Err(err) => printerr(err),
+                Err(err) => printerr(err)
                 }
             }
         })
