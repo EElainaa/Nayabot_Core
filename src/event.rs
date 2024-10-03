@@ -4,7 +4,7 @@ use std::fmt;
 use colored::Colorize;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-
+use anyhow::Error;
 use crate::funs::{array_to_string, time_to_string};
 
 #[derive(Debug)]
@@ -12,11 +12,12 @@ pub enum Event {
     LifecycleEvent{event:LifecycleEvent},
     HeartbeatEvent{event:HeartbeatEvent},
     GroupMsgEvent{event:GroupMsgEvent},
-    PrivateMsgEvent{event:PrivateMsgEvent}
+    PrivateMsgEvent{event:PrivateMsgEvent},
+    GroupRecall{event:GroupRecall}
 }
 
 impl Event {
-    pub fn from(s:&str)-> Result<Event,String>{
+    pub fn from(s:&str)-> Result<Event,Error>{
         if let Ok(event) = serde_json::from_str::<LifecycleEvent>(s) {
             return Ok(Event::LifecycleEvent { event })
         }else if let Ok(event) = serde_json::from_str::<HeartbeatEvent>(s) {
@@ -25,8 +26,10 @@ impl Event {
             return Ok(Event::GroupMsgEvent { event })
         }else if let Ok(event) = serde_json::from_str::<PrivateMsgEvent>(s) {
             return Ok(Event::PrivateMsgEvent { event })
+        }else if let Ok(event) = serde_json::from_str::<GroupRecall>(s) {
+            return Ok(Event::GroupRecall { event })
         }
-        Err("获取事件类型失败".to_string())
+        Err(Error::msg("获取事件类型失败"))
     }
 }
 
@@ -90,7 +93,7 @@ pub struct GroupMsgEvent{
     pub raw_message:String,
     pub font:i16,
     pub sub_type:String,
-    pub message:Vec<Value>,
+    pub message:Value,
     pub message_format:String,
     pub post_type:PostType,
     pub group_id:i64
@@ -98,7 +101,7 @@ pub struct GroupMsgEvent{
 
 impl fmt::Display for GroupMsgEvent {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f,"[{}]{}[{: >11}] | {}({}):{} ",self.self_id.to_string().blue(),"群".purple(),self.group_id.to_string().purple(),self.sender.nickname,self.user_id,array_to_string(&self.message))
+        write!(f,"[{}]{}[{: >11}] | {}({}):{} ",self.self_id.to_string().blue(),"群".purple(),self.group_id.to_string().purple(),self.sender.nickname,self.user_id,array_to_string(self.message.as_array().unwrap()))
     }
 }
 
@@ -156,6 +159,15 @@ pub struct EchoEvent{
     pub status:String,
     pub retcode:i8,
     pub data:Value,
+    pub message:String,
+    pub wording:String,
+    pub echo:String
+}
+
+#[derive(Debug,Serialize, Deserialize)]
+pub struct EchoStatus{
+    pub status:String,
+    pub retcode:i8,
     pub message:String,
     pub wording:String,
     pub echo:String
@@ -222,4 +234,16 @@ pub struct EchoAction{
     pub message:String,
     pub wording:String,
     pub echo:String
+}
+
+#[derive(Debug,Serialize, Deserialize)]
+pub struct GroupRecall{
+    pub time:i64,
+    pub self_id:i64,
+    pub post_type:String,
+    pub group_id:i64,
+    pub user_id:i64,
+    pub notice_type:String,
+    pub operator_id:i64,
+    pub message_id:i64
 }
