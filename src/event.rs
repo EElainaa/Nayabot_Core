@@ -90,7 +90,7 @@ pub struct GroupMsgEvent{
     pub raw_message:String,
     pub font:i16,
     pub sub_type:String,
-    pub message:Value,
+    pub message:Vec<Value>,
     pub message_format:String,
     pub post_type:PostType,
     pub group_id:i64
@@ -98,7 +98,7 @@ pub struct GroupMsgEvent{
 
 impl fmt::Display for GroupMsgEvent {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f,"[{}]{}[{: >11}] | {}({}):{} ",self.self_id.to_string().blue(),"群".purple(),self.group_id.to_string().purple(),self.sender.nickname,self.user_id,array_to_string(self.message.as_array().unwrap()))
+        write!(f,"[{}]{}[{: >11}] | {}({}):{} ",self.self_id.to_string().blue(),"群".purple(),self.group_id.to_string().purple(),self.sender.nickname,self.user_id,array_to_string(&self.message))
     }
 }
 

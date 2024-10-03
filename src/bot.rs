@@ -1,7 +1,7 @@
 //onebot v11
 use std::{fmt::Display, thread::JoinHandle};
-use crate::{error::BotError, event::*};
-
+use crate::event::*;
+use anyhow::Error;
 
 
 //TODO
@@ -47,19 +47,19 @@ pub trait BotAPI where Self:Sized{
     /// 发送群聊消息
     /// 
     /// 使用JSON格式
-    fn send_group_msg<T:Display>(&mut self,group_id:&i64,s:T)->Result<(),BotError>;
+    fn send_group_msg<T:Display>(&mut self,group_id:&i64,s:T)->Result<(),Error>;
     /// 发送私聊消息
     /// 
     /// 使用JSON格式
-    fn send_private_msg<T:Display>(&mut self,id:&i64,s:T)->Result<(),BotError>;
+    fn send_private_msg<T:Display>(&mut self,id:&i64,s:T)->Result<(),Error>;
     /// 获取登录状态
-    fn get_status(&mut self) -> Result<EchoGetStatus, BotError>;
+    fn get_status(&mut self) -> Result<EchoGetStatus, Error>;
     /// 获取协议端版本信息
-    fn get_version_info(&mut self)->Result<EchoGetVersionInfo, BotError>;
+    fn get_version_info(&mut self)->Result<EchoGetVersionInfo, Error>;
     /// 获取登录账号信息
-    fn get_login_info(&mut self)->Result<EchoLoginInfo, BotError>;
+    fn get_login_info(&mut self)->Result<EchoLoginInfo, Error>;
     /// 撤回消息
-    fn delete_msg(&mut self,msg_id:&i64)->Result<(),BotError>;
+    fn delete_msg(&mut self,msg_id:&i64)->Result<(),Error>;
 }
 
 /// Bot底层功能
@@ -67,15 +67,15 @@ pub trait BotAPI where Self:Sized{
 pub(crate) trait Bot where Self:BotAPI{
     //fn run_async(self) -> AbortHandle;
     /// 向协议端发送消息
-    fn send(&mut self,string:&String)->Result<(),BotError>;
+    fn send(&mut self,string:&String)->Result<(),Error>;
     /// 向协议端发送消息并接收返回消息
-    fn send_with_recive(&mut self,string:&String)->Result<String,BotError>;
+    fn send_with_recive(&mut self,string:&String)->Result<String,Error>;
     /// 向协议端异步发送消息
-    async fn send_async(&mut self,string:&String)->Result<(),BotError>;
+    async fn send_async(&mut self,string:&String)->Result<(),Error>;
     /// 向协议端异步发送消息并接收返回消息
-    async fn send_with_recive_async(&mut self,string:&String)->Result<String,BotError>;
+    async fn send_with_recive_async(&mut self,string:&String)->Result<String,Error>;
     /// 从协议端接收消息
-    fn recv_msg(&self)->Result<String,String>;
+    fn recv_msg(&self)->Result<String,Error>;
 }
 
 
@@ -118,37 +118,37 @@ impl Bot {
     pub fn set_restart(&self,delay:&i64)->Result<(), ws::Error>{self.sender.send(format!("{{\"action\": \"set_restart\",\"params\": {{\"delay\":{}}}}}",delay))}
     pub fn clean_cache(&self)->Result<(), ws::Error>{self.sender.send(format!("{{\"action\": \"clean_cache\"}}"))}
 }*/
-pub(crate) fn send_private_msg<B:Bot,T:Display>(bot:&mut B,id:&i64,s:T)->Result<(), BotError>{
+pub(crate) fn send_private_msg<B:Bot,T:Display>(bot:&mut B,id:&i64,s:T)->Result<(), Error>{
     bot.send_with_recive(&format!("{{\"action\": \"send_private_msg\",\"params\": {{\"user_id\":{},\"message\":{}}}}}",id,s))?;
     Ok(())
 }
 
-pub(crate) fn send_group_msg<B:Bot,T:Display>(bot:&mut B,id:&i64,s:T)->Result<(), BotError>{
+pub(crate) fn send_group_msg<B:Bot,T:Display>(bot:&mut B,id:&i64,s:T)->Result<(), Error>{
     bot.send_with_recive(&format!("{{\"action\": \"send_group_msg\",\"params\": {{\"group_id\":{},\"message\":{}}}}}",id,s))?;
     Ok(())
 }
 
-pub(crate) fn delete_msg<B:Bot>(bot:&mut B,msg_id:&i64)->Result<(), BotError>{
+pub(crate) fn delete_msg<B:Bot>(bot:&mut B,msg_id:&i64)->Result<(), Error>{
     bot.send_with_recive(&format!("{{\"action\": \"delete_msg\",\"params\": {{\"message_id\":{}}}}}",msg_id))?;
     Ok(())
 }
 
-pub(crate) fn get_msg<B:Bot>(bot:&mut B,msg_id:&i64)->Result<(), BotError>{
+pub(crate) fn get_msg<B:Bot>(bot:&mut B,msg_id:&i64)->Result<(), Error>{
     bot.send_with_recive(&format!("{{\"action\": \"get_msg\",\"params\": {{\"message_id\":{}}}}}",msg_id))?;
     Ok(())
 }
 
-pub(crate) fn get_status<T:Bot>(bot:&mut T)->Result<EchoGetStatus, BotError>{
+pub(crate) fn get_status<T:Bot>(bot:&mut T)->Result<EchoGetStatus, Error>{
     let res = bot.send_with_recive(&format!("{{\"action\": \"get_status\"}}"))?;
     Ok(serde_json::from_value::<EchoGetStatus>(serde_json::from_str::<EchoEvent>(res.as_str())?.data)?)
 }
 
-pub(crate) fn get_version_info<T:Bot>(bot:&mut T)->Result<EchoGetVersionInfo, BotError>{
+pub(crate) fn get_version_info<T:Bot>(bot:&mut T)->Result<EchoGetVersionInfo, Error>{
     let res = bot.send_with_recive(&format!("{{\"action\": \"get_version_info\"}}"))?;
     Ok(serde_json::from_value::<EchoGetVersionInfo>(serde_json::from_str::<EchoEvent>(res.as_str())?.data)?)
 }
 
-pub(crate) fn get_login_info<T:Bot>(bot:&mut T)->Result<EchoLoginInfo, BotError>{
+pub(crate) fn get_login_info<T:Bot>(bot:&mut T)->Result<EchoLoginInfo, Error>{
     let res = bot.send_with_recive(&format!("{{\"action\": \"get_login_info\"}}"))?;
     let echo_event = serde_json::from_str::<EchoEvent>(res.as_str())?;
     let login_info = serde_json::from_value::<EchoLoginInfo>(echo_event.data)?;

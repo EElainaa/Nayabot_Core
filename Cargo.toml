@@ -1,5 +1,5 @@
 [package]
-name = "NayaCore"
+name = "nayabot_core"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,9 +8,9 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 colored="2.1"
 chrono="0.4.38"
-
+anyhow="1.0.89"
 reqwest={version="0.12",features = ["json"]}
 tungstenite="0.24"
 
 [lib]
-name="Nayabot_Core"
+name="nayabot_core"

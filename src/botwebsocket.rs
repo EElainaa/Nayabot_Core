@@ -1,8 +1,8 @@
 use std::{fmt::Display, net::TcpStream, str::FromStr, sync::{Arc, Mutex}, thread::{self, JoinHandle}};
 
 use tungstenite::{http::Uri, stream::MaybeTlsStream, Message, WebSocket};
-
-use crate::{bot::*, error::BotError, event::*, funs::*};
+use anyhow::Error;
+use crate::{bot::*, event::*, funs::*};
 
 type WS=Arc<Mutex<WebSocket<MaybeTlsStream<TcpStream>>>>;
 
@@ -16,7 +16,7 @@ pub struct BotWebsocket{
 
 impl BotWebsocket{
     ///通过正向ws连接协议端
-    pub fn new<T:Display>(url:T,token:T)->Result<BotWebsocket,BotError>{
+    pub fn new<T:Display>(url:T,token:T)->Result<BotWebsocket,Error>{
         let uri = Uri::from_str(url.to_string().as_str())?;
         let builder = tungstenite::ClientRequestBuilder::new(uri).with_header("Authorization", format!("Bearer {}",token));
         let mut ws = tungstenite::connect(builder)?.0;
@@ -32,22 +32,22 @@ impl BotWebsocket{
 }
 
 impl Bot for BotWebsocket {
-    fn send(&mut self,string:&String)->Result<(),BotError> {
+    fn send(&mut self,string:&String)->Result<(),Error> {
         Ok(self.ws.lock().unwrap().send(Message::text(string))?)
     }
-    fn send_with_recive(&mut self,string:&String)->Result<String,BotError> {
+    fn send_with_recive(&mut self,string:&String)->Result<String,Error> {
         self.send(string)?;
         Ok(self.ws.lock().unwrap().read()?.to_string())
     }
-    async fn send_async(&mut self,string:&String)->Result<(),BotError> {
+    async fn send_async(&mut self,string:&String)->Result<(),Error> {
         Ok(self.ws.lock().unwrap().send(Message::text(string))?)
     }
-    async fn send_with_recive_async(&mut self,string:&String)->Result<String,BotError> {
+    async fn send_with_recive_async(&mut self,string:&String)->Result<String,Error> {
         self.ws.lock().unwrap().send(Message::text(string))?;
         Ok(self.ws.lock().unwrap().read()?.to_string())
     }
-    fn recv_msg(&self)->Result<String,String>{
-        Ok(self.ws.lock().unwrap().read().unwrap().to_string())
+    fn recv_msg(&self)->Result<String,Error>{
+        Ok(self.ws.lock().unwrap().read()?.to_string())
     }
 }
 
@@ -63,26 +63,26 @@ impl BotAPI for BotWebsocket {
                             if let Some(f) = bot.subscribes.lifecycle_event{
                                 f(&mut bot,event)
                             }
-                        },
+                        }
                         Ok(Event::HeartbeatEvent{event}) => {
                             if let Some(f) = bot.subscribes.heartbeat_event{
                                 f(&mut bot,event)
                             }
-                        },
+                        }
                         Ok(Event::GroupMsgEvent{event}) => {
                             if let Some(f) = bot.subscribes.group_msg_event{
                                 f(&mut bot,event)
                             }
-                        },
+                        }
                         Ok(Event::PrivateMsgEvent{event}) => {
                             if let Some(f) = bot.subscribes.private_msg_event{
                                 f(&mut bot,event)
                             }
-                        },
+                        }
                         Err(err) => {
                             printerr(err);
                             printerr(str)
-                        },
+                        }
                     }
                 },
                 Err(err) => printerr(err),
@@ -98,23 +98,22 @@ impl BotAPI for BotWebsocket {
             EventResolve::PrivateMsgEvent(f) => self.subscribes.private_msg_event=Some(f),
         }
     }
-    fn send_private_msg<T:Display>(&mut self,id:&i64,s:T)->Result<(),BotError>{
+    fn send_private_msg<T:Display>(&mut self,id:&i64,s:T)->Result<(),Error>{
         send_private_msg(self, id, s)
     }
-    fn get_status(&mut self)->Result<EchoGetStatus, BotError>{
+    fn get_status(&mut self)->Result<EchoGetStatus, Error>{
         get_status(self)
     }
-    fn get_version_info(&mut self)->Result<EchoGetVersionInfo, BotError>{
+    fn get_version_info(&mut self)->Result<EchoGetVersionInfo, Error>{
         get_version_info(self)
     }
-    fn get_login_info(&mut self)->Result<EchoLoginInfo, BotError>{
+    fn get_login_info(&mut self)->Result<EchoLoginInfo, Error>{
         get_login_info(self)
     }
-    fn send_group_msg<T:Display>(&mut self,group_id:&i64,s:T)->Result<(),BotError> {
+    fn send_group_msg<T:Display>(&mut self,group_id:&i64,s:T)->Result<(),Error> {
         send_group_msg(self, group_id, s)
     }
-    
-    fn delete_msg(&mut self,msg_id:&i64)->Result<(),BotError> {
+    fn delete_msg(&mut self,msg_id:&i64)->Result<(),Error> {
         delete_msg(self, msg_id)
     }
 }

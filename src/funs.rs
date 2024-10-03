@@ -4,7 +4,7 @@ use colored::Colorize;
 
 use crate::message::*;
 
-pub fn array_to_string(array:&Vec<Value>)->String{
+pub(crate) fn array_to_string(array:&Vec<Value>)->String{
     let mut ostr=String::new();
     array.iter().for_each(|s|{
         let m:MsgData = serde_json::from_value(s.clone()).unwrap();//解析消息类型
@@ -23,7 +23,7 @@ pub fn array_to_string(array:&Vec<Value>)->String{
     ostr
 }
 
-pub fn time_to_string(time:i64)->String{
+pub(crate) fn time_to_string(time:i64)->String{
     DateTime::from_timestamp(time,0).unwrap().with_timezone(&FixedOffset::east_opt(8*3600).unwrap()).format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
