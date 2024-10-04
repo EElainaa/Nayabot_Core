@@ -1,7 +1,7 @@
 use std::{fmt::Display, net::TcpStream, str::FromStr, sync::{Arc, Mutex}, thread::{self, JoinHandle}};
 
 use tungstenite::{http::Uri, stream::MaybeTlsStream, Message, WebSocket};
-use anyhow::Error;
+use anyhow::{Context, Error};
 use crate::{bot::*, event::*, funs::*};
 
 type WS=Arc<Mutex<WebSocket<MaybeTlsStream<TcpStream>>>>;
@@ -16,10 +16,10 @@ pub struct BotWebsocket{
 
 impl BotWebsocket{
     ///通过正向ws连接协议端
-    pub fn new<T:Display>(url:T,token:T)->Result<BotWebsocket,Error>{
-        let uri = Uri::from_str(url.to_string().as_str())?;
-        let builder = tungstenite::ClientRequestBuilder::new(uri).with_header("Authorization", format!("Bearer {}",token));
-        let mut ws = tungstenite::connect(builder)?.0;
+    pub fn new<T:Display>(url:T,token:&str)->Result<BotWebsocket,Error>{
+        let uri = Uri::from_str(url.to_string().as_str()).with_context(||"Url格式错误")?;
+        let builder = if token.is_empty(){tungstenite::ClientRequestBuilder::new(uri)}else{tungstenite::ClientRequestBuilder::new(uri).with_header("Authorization",format!("Bearer {}",token))};
+        let mut ws = tungstenite::connect(builder).with_context(||format!("连接{}失败",url))?.0;
         let s = ws.read()?;
         let lifecycle_event:LifecycleEvent=serde_json::from_str(s.to_string().as_str())?;
         Ok(BotWebsocket{
@@ -29,12 +29,10 @@ impl BotWebsocket{
             subscribes:Subscribes::<Self>::default()
         })
     }
-    
-    pub fn url(&self) -> &str {
+    pub fn get_url(&self) -> &str {
         &self.url
     }
-    
-    pub fn id(&self) -> i64 {
+    pub fn get_id(&self) -> i64 {
         self.id
     }
 }
@@ -64,7 +62,7 @@ impl Bot for BotWebsocket {
 
 impl BotAPI for BotWebsocket {
     fn run(self) -> JoinHandle<()> {
-        let mut bot = self;//别用self
+        let mut bot = self;
         thread::spawn(move ||{
             loop{
                 match bot.recv_msg(){
@@ -122,8 +120,8 @@ impl BotAPI for BotWebsocket {
     fn send_group_msg<T:Display>(&mut self,group_id:&i64,s:T)->Result<EchoStatus,Error> {send_group_msg(self, group_id, s)}
     fn delete_msg(&mut self,msg_id:&i64)->Result<EchoStatus,Error> {delete_msg(self, msg_id)}
     fn clean_cache(&mut self)->Result<EchoStatus, Error> {clean_cache(self)}
-    fn get_msg(&mut self,msg_id:&i64)->Result<EchoAction, Error> {get_msg(self, msg_id)}
-    fn get_forward_msg(&mut self,id:&i64)->Result<EchoAction, Error> {get_forward_msg(self, id)}
+    fn get_msg(&mut self,msg_id:&i64)->Result<EchoEvent, Error> {get_msg(self, msg_id)}
+    fn get_forward_msg(&mut self,id:&i64)->Result<EchoEvent, Error> {get_forward_msg(self, id)}
     fn send_like(&mut self,user_id:&i64,times:i16)->Result<EchoStatus, Error> {send_like(self, user_id, times)}
     fn set_group_kick(&mut self,group_id:&i64,user_id:&i64,reject_add_request:&bool)->Result<EchoStatus, Error> {set_group_kick(self, group_id, user_id, reject_add_request)}
     fn set_group_ban(&mut self,group_id:&i64,user_id:&i64,duration:i64)->Result<EchoStatus, Error> {set_group_ban(self, group_id, user_id, duration)}
@@ -135,19 +133,19 @@ impl BotAPI for BotWebsocket {
     fn set_group_special_title <T:Display>(&mut self,group_id:&i64,user_id:&i64,special_title:&T)->Result<EchoStatus, Error> {set_group_special_title(self, group_id, user_id, special_title)}
     fn set_friend_add_request<T:Display>(&mut self,flag:&T,approve:&bool,remark:&T)->Result<EchoStatus, Error> {set_friend_add_request(self, flag, approve, remark)}
     fn set_group_add_request<T:Display>(&mut self,flag:&T,sub_type:&T,approve:&bool,reason:&T)->Result<EchoStatus, Error> {set_group_add_request(self, flag, sub_type, approve, reason)}
-    fn get_stranger_info(&mut self,user_id:&i64)->Result<EchoAction, Error> {get_stranger_info(self, user_id)}
-    fn get_friend_list(&mut self)->Result<EchoAction, Error> {get_friend_list(self)}
-    fn get_group_info(&mut self,group_id:&i64)->Result<EchoAction, Error> {get_group_info(self, group_id)}
-    fn get_group_list(&mut self)->Result<EchoAction, Error> {get_group_list(self)}
-    fn get_group_member_info(&mut self,group_id:&i64,user_id:&i64)->Result<EchoAction, Error> {get_group_member_info(self, group_id, user_id)}
-    fn get_group_member_list(&mut self,group_id:&i64)->Result<EchoAction, Error> {get_group_member_list(self, group_id)}
-    fn get_group_honor_info(&mut self,group_id:&i64,r#type:String)->Result<EchoAction, Error> {get_group_honor_info(self, group_id, r#type)}
-    fn get_cookies<T:Display>(&mut self,domain:&T)->Result<EchoAction, Error> {get_cookies(self, domain)}
-    fn get_csrf_token(&mut self)->Result<EchoAction, Error> {get_csrf_token(self)}
-    fn get_credentials<T:Display>(&mut self,domain:&T)->Result<EchoAction, Error> {get_credentials(self, domain)}
-    fn get_record<T:Display>(&mut self,file:&T,out_format:&T)->Result<EchoAction, Error> {get_record(self, file, out_format)}
-    fn get_image<T:Display>(&mut self,file:&T)->Result<EchoAction, Error> {get_image(self, file)}
-    fn can_send_image(&mut self)->Result<EchoAction, Error> {can_send_image(self)}
-    fn can_send_record(&mut self)->Result<EchoAction, Error> {can_send_record(self)}
+    fn get_stranger_info(&mut self,user_id:&i64)->Result<EchoEvent, Error> {get_stranger_info(self, user_id)}
+    fn get_friend_list(&mut self)->Result<EchoEvent, Error> {get_friend_list(self)}
+    fn get_group_info(&mut self,group_id:&i64)->Result<EchoEvent, Error> {get_group_info(self, group_id)}
+    fn get_group_list(&mut self)->Result<EchoEvent, Error> {get_group_list(self)}
+    fn get_group_member_info(&mut self,group_id:&i64,user_id:&i64)->Result<EchoEvent, Error> {get_group_member_info(self, group_id, user_id)}
+    fn get_group_member_list(&mut self,group_id:&i64)->Result<EchoEvent, Error> {get_group_member_list(self, group_id)}
+    fn get_group_honor_info(&mut self,group_id:&i64,r#type:String)->Result<EchoEvent, Error> {get_group_honor_info(self, group_id, r#type)}
+    fn get_cookies<T:Display>(&mut self,domain:&T)->Result<EchoEvent, Error> {get_cookies(self, domain)}
+    fn get_csrf_token(&mut self)->Result<EchoEvent, Error> {get_csrf_token(self)}
+    fn get_credentials<T:Display>(&mut self,domain:&T)->Result<EchoEvent, Error> {get_credentials(self, domain)}
+    fn get_record<T:Display>(&mut self,file:&T,out_format:&T)->Result<EchoEvent, Error> {get_record(self, file, out_format)}
+    fn get_image<T:Display>(&mut self,file:&T)->Result<EchoEvent, Error> {get_image(self, file)}
+    fn can_send_image(&mut self)->Result<EchoEvent, Error> {can_send_image(self)}
+    fn can_send_record(&mut self)->Result<EchoEvent, Error> {can_send_record(self)}
     fn set_restart(&mut self,delay:i64)->Result<EchoStatus, Error> {set_restart(self, delay)}
 }
