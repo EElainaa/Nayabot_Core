@@ -32,7 +32,7 @@ impl Event {
         Err(Error::msg("获取事件类型失败"))
     }
 }
-
+/// 上报类型
 #[derive(Debug,Serialize,Deserialize)]
 pub enum PostType {
     #[serde(rename = "message")]
@@ -44,7 +44,7 @@ pub enum PostType {
     #[serde(rename = "meta_event")]
     MetaEvent
 }
-
+/// 消息类型
 #[derive(Debug,Serialize, Deserialize)]
 pub enum MessageType{
     #[serde(rename = "group")]
@@ -52,7 +52,7 @@ pub enum MessageType{
     #[serde(rename = "private")]
     Private
 }
-
+/// 元事件类型
 #[derive(Debug,Serialize, Deserialize)]
 pub enum MetaEventType{
     #[serde(rename = "heartbeat")]
@@ -60,18 +60,18 @@ pub enum MetaEventType{
     #[serde(rename = "lifecycle")]
     Lifecycle
 }
-
+/// 生命周期事件
 #[derive(Debug,Serialize, Deserialize)]
-pub struct LifecycleEvent{//生命周期
+pub struct LifecycleEvent{
     pub time:i64,
     pub self_id:i64,
     pub post_type:String,
     pub meta_event_type:String,
     pub sub_type:String
 }
-
+/// 心跳事件
 #[derive(Debug,Serialize, Deserialize)]
-pub struct HeartbeatEvent{//心跳
+pub struct HeartbeatEvent{
     pub time:i64,
     pub self_id:i64,
     pub post_type:String,
@@ -79,7 +79,7 @@ pub struct HeartbeatEvent{//心跳
     pub status:Value,
     pub interval:i32
 }
-
+/// 群聊消息事件
 #[derive(Debug,Serialize, Deserialize)]
 pub struct GroupMsgEvent{
     pub self_id:i64,
@@ -104,7 +104,7 @@ impl fmt::Display for GroupMsgEvent {
         write!(f,"[{}]{}[{: >11}] | {}({}):{} ",self.self_id.to_string().blue(),"群".purple(),self.group_id.to_string().purple(),self.sender.nickname,self.user_id,array_to_string(self.message.as_array().unwrap()))
     }
 }
-
+/// 群聊消息发送者
 #[derive(Debug,Serialize, Deserialize)]
 pub struct GroupMsgSender{
     pub user_id:i64,
@@ -112,7 +112,7 @@ pub struct GroupMsgSender{
     pub card:String,
     pub role:GroupRole
 }
-
+/// 群权限
 #[derive(Debug,Serialize, Deserialize)]
 pub enum GroupRole{
     #[serde(rename = "owner")]
@@ -122,14 +122,14 @@ pub enum GroupRole{
     #[serde(rename = "member")]
     Member
 }
-
+/// 群消息子类型
 #[derive(Debug,Serialize, Deserialize)]
 pub enum GroupSubType {
     Normal,
     Anonymous,
     Notice
 }
-
+/// 私聊消息
 #[derive(Debug,Serialize, Deserialize)]
 pub struct PrivateMsgEvent{
     pub self_id:i64,
@@ -153,7 +153,7 @@ impl fmt::Display for PrivateMsgEvent {
         write!(f,"{} [{}][{}]{}[{: >11}] | {}({}):{} ",time_to_string(self.time),"Inf".green(),self.self_id.to_string().blue(),"私".purple(),self.user_id.to_string().purple(),self.sender["nickname"],self.user_id,array_to_string(self.message.as_array().unwrap()))
     }
 }
-
+/// 回应事件
 #[derive(Debug,Serialize, Deserialize)]
 pub struct EchoEvent{
     pub status:String,
@@ -163,7 +163,7 @@ pub struct EchoEvent{
     pub wording:String,
     pub echo:String
 }
-
+/// 执行结果回应
 #[derive(Debug,Serialize, Deserialize)]
 pub struct EchoStatus{
     pub status:String,
@@ -172,27 +172,27 @@ pub struct EchoStatus{
     pub wording:String,
     pub echo:String
 }
-
+/// 获取状态回应
 #[derive(Debug,Serialize, Deserialize)]
 pub struct EchoGetStatus{
     pub online:bool,
     pub good:bool,
     pub stat:Value
 }
-
+/// 获取协议端版本信息回应
 #[derive(Debug,Serialize, Deserialize)]
 pub struct EchoGetVersionInfo{
     pub app_name:String,
     pub protocol_version:String,
     pub app_version:String
 }
-
+/// 获取登录信息回应
 #[derive(Debug,Serialize, Deserialize)]
 pub struct EchoLoginInfo{
     pub user_id:i64,
     pub nickname:String
 }
-
+/// 群消息发送事件
 #[derive(Debug,Serialize, Deserialize)]
 pub struct GroupMessageSent{
     pub self_id:i64,
@@ -213,7 +213,7 @@ pub struct GroupMessageSent{
     pub group_id:i64,
     pub target_id:i64
 }
-
+/// 群名片改变事件
 #[derive(Debug,Serialize, Deserialize)]
 pub struct ChangeGroupCard{
     pub time:i64,
@@ -225,17 +225,7 @@ pub struct ChangeGroupCard{
     pub card_new:String,
     pub card_old:String
 }
-
-#[derive(Debug,Serialize, Deserialize)]
-pub struct EchoAction{
-    pub status:String,
-    pub retcode:i8,
-    pub data:Value,
-    pub message:String,
-    pub wording:String,
-    pub echo:String
-}
-
+/// 群聊消息撤回事件
 #[derive(Debug,Serialize, Deserialize)]
 pub struct GroupRecall{
     pub time:i64,
