@@ -55,7 +55,6 @@ impl Bot for BotWebsocket {
     }
     fn recv_msg(&self)->Result<String,Error>{
         let s = self.ws.lock().unwrap().read()?.to_string();
-        printinf(&s);
         Ok(s)
     }
 }

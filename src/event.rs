@@ -237,3 +237,14 @@ pub struct GroupRecall{
     pub operator_id:i64,
     pub message_id:i64
 }
+/// 设置群管理员事件
+#[derive(Debug,Serialize, Deserialize)]
+pub struct ChangeGroupAdmin{
+    pub time:i64,
+    pub self_id:i64,
+    pub post_type:String,
+    pub group_id:i64,
+    pub user_id:i64,
+    pub notice_type:String,
+    pub sub_type:String
+}
