@@ -8,12 +8,13 @@ use anyhow::Error;
 use crate::funs::{array_to_string, time_to_string};
 
 #[derive(Debug)]
-pub enum Event {
+pub enum Event{
     LifecycleEvent{event:LifecycleEvent},
     HeartbeatEvent{event:HeartbeatEvent},
     GroupMsgEvent{event:GroupMsgEvent},
     PrivateMsgEvent{event:PrivateMsgEvent},
-    GroupRecall{event:GroupRecall}
+    GroupRecall{event:GroupRecall},
+    EchoEvent{event:EchoEvent}
 }
 
 impl Event {
@@ -28,8 +29,10 @@ impl Event {
             return Ok(Event::PrivateMsgEvent { event })
         }else if let Ok(event) = serde_json::from_str::<GroupRecall>(s) {
             return Ok(Event::GroupRecall { event })
+        }else if let Ok(event) = serde_json::from_str::<EchoEvent>(s) {
+            return Ok(Event::EchoEvent { event })
         }
-        Err(Error::msg("获取事件类型失败"))
+        Err(Error::msg(format!("获取事件类型失败:{}",s)))
     }
 }
 /// 上报类型
@@ -161,16 +164,12 @@ pub struct EchoEvent{
     pub data:Value,
     pub message:String,
     pub wording:String,
-    pub echo:String
+    pub echo:u16
 }
 /// 执行结果回应
 #[derive(Debug,Serialize, Deserialize)]
 pub struct EchoStatus{
-    pub status:String,
-    pub retcode:i8,
-    pub message:String,
-    pub wording:String,
-    pub echo:String
+    pub message_id:i64,
 }
 /// 获取状态回应
 #[derive(Debug,Serialize, Deserialize)]
@@ -184,7 +183,7 @@ pub struct EchoGetStatus{
 pub struct EchoGetVersionInfo{
     pub app_name:String,
     pub protocol_version:String,
-    pub app_version:String
+    pub app_version:String,
 }
 /// 获取登录信息回应
 #[derive(Debug,Serialize, Deserialize)]

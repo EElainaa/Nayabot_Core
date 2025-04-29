@@ -1,5 +1,4 @@
 use std::fmt::Display;
-
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -61,28 +60,28 @@ pub struct Video{
 
 /// 构建一条JSON格式的消息
 /// ```rust
-/// let msg = MessageBuilder::new().text("Hello, World!").build();
+/// let msg = Message::new().text("Hello, World!").build();
 /// ```
-pub struct MessageBuilder{
+pub struct Message{
     msg:Value
 }
 
 #[allow(dead_code)]
-impl MessageBuilder {
-    pub fn new()->MessageBuilder{MessageBuilder{msg:Value::Array(vec![])}}
-    pub fn build(self)->Value{self.msg}
-    pub fn text<T:ToString>(mut self,s:T)->MessageBuilder{self.msg.as_array_mut().unwrap().push(serde_json::json!({"type": "text","data": {"text": s.to_string()}}));self}
-    pub fn face(mut self,s:u32)->MessageBuilder{self.msg.as_array_mut().unwrap().push(serde_json::json!({"type": "face","data": {"id": s.to_string()}}));self}
-    pub fn image<T:ToString>(mut self,s:T)->MessageBuilder{self.msg.as_array_mut().unwrap().push(serde_json::json!({"type": "image","data": {"file": s.to_string()}}));self}
-    pub fn record<T:ToString>(mut self,s:T)->MessageBuilder{self.msg.as_array_mut().unwrap().push(serde_json::json!({"type": "record","data": {"file": s.to_string()}}));self}
-    pub fn video<T:ToString>(mut self,s:T)->MessageBuilder{self.msg.as_array_mut().unwrap().push(serde_json::json!({"type": "video","data": {"file": s.to_string()}}));self}
-    pub fn at<T:ToString>(mut self,s:T)->MessageBuilder{self.msg.as_array_mut().unwrap().push(serde_json::json!({"type": "at","data": {"qq": s.to_string()}}));self}
-    pub fn rps<T:ToString>(mut self)->MessageBuilder{self.msg.as_array_mut().unwrap().push(serde_json::json!({"type": "rps"}));self}
-    pub fn reply<T:ToString>(mut self,s:T)->MessageBuilder{self.msg.as_array_mut().unwrap().push(serde_json::json!({"type": "reply","data": {"id": s.to_string()}}));self}
-    pub fn forward<T:ToString>(mut self,s:T)->MessageBuilder{self.msg.as_array_mut().unwrap().push(serde_json::json!({"type": "forward","data": {"id": s.to_string()}}));self}
+impl Message {
+    pub fn new()->Message{Message{msg:Value::Array(vec![])}}
+    pub fn get_string(self)->String{self.to_string()}
+    pub fn text<T:ToString>(mut self,s:T)->Message{self.msg.as_array_mut().unwrap().push(serde_json::json!({"type": "text","data": {"text": s.to_string()}}));self}
+    pub fn face(mut self,s:u32)->Message{self.msg.as_array_mut().unwrap().push(serde_json::json!({"type": "face","data": {"id": s.to_string()}}));self}
+    pub fn image<T:ToString>(mut self,s:T)->Message{self.msg.as_array_mut().unwrap().push(serde_json::json!({"type": "image","data": {"file": s.to_string()}}));self}
+    pub fn record<T:ToString>(mut self,s:T)->Message{self.msg.as_array_mut().unwrap().push(serde_json::json!({"type": "record","data": {"file": s.to_string()}}));self}
+    pub fn video<T:ToString>(mut self,s:T)->Message{self.msg.as_array_mut().unwrap().push(serde_json::json!({"type": "video","data": {"file": s.to_string()}}));self}
+    pub fn at<T:ToString>(mut self,s:T)->Message{self.msg.as_array_mut().unwrap().push(serde_json::json!({"type": "at","data": {"qq": s.to_string()}}));self}
+    pub fn rps<T:ToString>(mut self)->Message{self.msg.as_array_mut().unwrap().push(serde_json::json!({"type": "rps"}));self}
+    pub fn reply<T:ToString>(mut self,s:T)->Message{self.msg.as_array_mut().unwrap().push(serde_json::json!({"type": "reply","data": {"id": s.to_string()}}));self}
+    pub fn forward<T:ToString>(mut self,s:T)->Message{self.msg.as_array_mut().unwrap().push(serde_json::json!({"type": "forward","data": {"id": s.to_string()}}));self}
 }
 
-impl Display for MessageBuilder {
+impl Display for Message {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let json=format!("{}",serde_json::json!(self.msg));
         write!(f,"{}", json)

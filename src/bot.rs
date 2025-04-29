@@ -1,8 +1,220 @@
-//onebot v11
-use std::{fmt::Display, thread::JoinHandle};
-use crate::event::*;
-use anyhow::{Context, Error, Result};
+use std::{fmt::Debug, future::Future, pin::Pin, sync::Arc};
+use async_trait::async_trait;
+use dashmap::DashMap;
+use serde_json::Value;
+use tokio::{runtime::Handle, sync::{mpsc::{self, Receiver, Sender}, Mutex}, task::block_in_place};
+use tungstenite::ClientRequestBuilder;
+use crate::{event::{self, *}, funs::{printinf, printwrm}, message::Message, protocol::{NetControl, NetProtocol, ProtocolType}};
+use anyhow::{Error, Result};
 
+pub struct Bot{
+    pub id:i64,
+    protocol:NetProtocol,
+    tx_pool:Arc<DashMap<u16,Sender<Event>>>,
+    events:Arc<DashMap<u16,Box<dyn Fn(event::Event) -> Pin<Box<dyn Future<Output = ()>+ Send>>+ Send>>>
+}
+
+impl Debug for Bot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Bot").field("id", &self.id).field("protocol", &self.protocol).field("tx_pool", &self.tx_pool).finish()
+    }
+}
+
+impl Clone for Bot {
+    /// 克隆一个Bot对象,克隆的对象拥有除事件订阅以外所有原对象相同的数据
+    fn clone(&self) -> Self {
+        Self { id: self.id.clone(), protocol: self.protocol.clone(), tx_pool: self.tx_pool.clone(), events: Arc::new(DashMap::new()) }
+    }
+}
+
+/// Bot基础功能
+#[async_trait]
+pub trait BaseBot {
+    /// 发送群聊消息
+    async fn send_group_msg(&self,group_id:&i64,s:Message)->Result<EchoStatus,Error>;
+    /// 获取登录账号信息
+    async fn get_login_info(&self)->Result<EchoLoginInfo, Error>;
+    /// 获取协议端版本信息
+    async fn get_version_info(&self)->Result<EchoGetVersionInfo, Error>;
+}
+
+#[allow(non_camel_case_types)]
+/// napcat扩展功能
+pub trait napcatBot {
+    
+}
+
+#[async_trait]
+impl BaseBot for Bot {
+    async fn send_group_msg(&self,group_id:&i64,msg:Message)->Result<EchoStatus,Error>{
+        let random_echo = random_echo(self);
+        let mut rx = push_echo(self,random_echo)?;
+        self.protocol.send(format!("{{\"action\": \"send_group_msg\",\"params\": {{\"group_id\":{group_id},\"message\":{msg}}},\"echo\":{random_echo}}}")).await?;
+        let e = rx.recv().await.unwrap();
+        match e {
+            Event::EchoEvent { event } => {
+                if event.status=="failed"&&event.echo==random_echo{
+                    return Err(Error::msg(event.message.clone()));
+                }else if event.echo==random_echo{
+                    return Ok(serde_json::from_value::<EchoStatus>(event.data.clone())?);
+                }
+                Ok(serde_json::from_value::<EchoStatus>(event.data)?)
+            },
+            _=>{
+                Err(Error::msg("接收到一个错误的事件类型"))
+            }
+        }
+    }
+    async fn get_login_info(&self)->Result<EchoLoginInfo, Error>{
+        let random_echo = random_echo(self);
+        let mut rx = push_echo(self,random_echo)?;
+        self.protocol.send(format!("{{\"action\": \"get_version_info\",\"echo\":{random_echo}}}")).await?;
+        let e = rx.recv().await.unwrap();
+        match e {
+            Event::EchoEvent { event } => {
+                if event.status=="failed"&&event.echo==random_echo{
+                    return Err(Error::msg(event.message.clone()));
+                }else if event.echo==random_echo{
+                    return Ok(serde_json::from_value::<EchoLoginInfo>(event.data.clone())?);
+                }
+                Ok(serde_json::from_value::<EchoLoginInfo>(event.data)?)
+            },
+            _=>{
+                Err(Error::msg("接收到一个错误的事件类型"))
+            }
+        }
+    }
+    async fn get_version_info(&self) -> Result<EchoGetVersionInfo,Error>{
+        let random_echo = random_echo(self);
+        let mut rx = push_echo(self,random_echo)?;
+        self.protocol.send(format!("{{\"action\": \"get_version_info\",\"echo\":{random_echo}}}")).await?;
+        let e = rx.recv().await.unwrap();
+        match e {
+            Event::EchoEvent { event } => {
+                if event.status=="failed"&&event.echo==random_echo{
+                    return Err(Error::msg(event.message.clone()));
+                }else if event.echo==random_echo{
+                    return Ok(serde_json::from_value::<EchoGetVersionInfo>(event.data.clone())?);
+                }
+                Ok(serde_json::from_value::<EchoGetVersionInfo>(event.data)?)
+            },
+            _=>{
+                Err(Error::msg("接收到一个错误的事件类型"))
+            }
+        }
+    }
+}
+
+fn random_echo(bot:&Bot)->u16{
+    let mut random_echo = rand::random::<u16>();
+    loop{
+        if bot.tx_pool.contains_key(&random_echo){
+            random_echo = rand::random::<u16>();
+            continue;
+        }else {
+            break;
+        }
+    }
+    random_echo
+}
+
+fn push_echo(bot:&Bot,random_echo:u16)->Result<Receiver<Event>,Error>{
+    let (tx,rx) = mpsc::channel::<Event>(50);
+    bot.subscribe_echo(random_echo, tx)?;
+    Ok(rx)
+}
+
+impl Bot {
+    /// 运行Bot事件推送功能
+    pub fn run(self) -> tokio::task::JoinHandle<()> {
+        loop{
+            let mut r;
+            block_in_place(||
+                Handle::current().block_on(async move {
+                    r = self.protocol.recv().await
+                })
+            );
+            match r {
+                Ok(s) => {
+                    match Event::from(&s){
+                        Ok(e) => {
+                            match e {
+                                Event::LifecycleEvent { event } => {
+                                    printinf(format!("{event:?}"));
+                                }
+                                Event::HeartbeatEvent { event } => {
+                                    printinf(format!("{event:?}"));
+                                }
+                                Event::GroupMsgEvent { event } => {
+                                    printinf(format!("{event:?}"));
+                                }
+                                Event::PrivateMsgEvent { event } => {
+                                    printinf(format!("{event:?}"));
+                                }
+                                Event::GroupRecall { event } => {
+                                    printinf(format!("{event:?}"));
+                                }
+                                Event::EchoEvent { event }=> {
+                                    if let Some((_,tx)) = self.tx_pool.remove(&event.echo){
+                                        tx.blocking_send(event::Event::EchoEvent { event }).unwrap();
+                                    }else{
+                                        printwrm(format!("未找到echo为{}的发送者",&event.echo));
+                                    }
+                                }
+                            }
+                        },
+                        Err(err) => {
+                            printwrm(err);
+                        },
+                    }
+                },
+                Err(err) => {
+                    printwrm(err);
+                    continue;
+                },
+            }
+        }
+    }
+    fn subscribe_echo(&self,echo:u16,tx:Sender<Event>)->Result<(),Error>{
+        self.tx_pool.insert(echo, tx);
+        Ok(())
+    }
+    pub fn subscribe(&self,event:Event,fun:Box<dyn Fn(Event) -> Pin<Box<dyn Future<Output = ()>>>>){
+        self.events.insert("1", fun);
+    }
+    /// 创建Bot
+    /// 
+    /// 传入[crate::protocol::ProtocolType]来控制协议类型
+    pub async fn new(protocol_type:ProtocolType)->Result<Bot>{
+        match protocol_type {
+            ProtocolType::WebSocket(url,token) => {
+                let url = if url.trim().starts_with("ws://"){url}else{format!("ws://{}",url.trim())};// 补全地址
+                let b = ClientRequestBuilder::new(url.parse()?);
+                let builder = if !token.trim().eq(""){b.with_header("Authorization", format!("Bearer {token}"))}else{b};//添加鉴权请求头
+                let ws = Mutex::new(tungstenite::connect(builder)?.0);
+
+                //判断是否连接成功
+                let status:Value = serde_json::from_str(ws.lock().await.read()?.into_text()?.to_string().as_str())?;
+                if status.get("status")==Some(&Value::from("failed")){
+                    return Err(Error::msg(status.get("message").unwrap().clone()))
+                };
+                let id = status.get("self_id").unwrap().as_i64().unwrap();
+
+                //包装Bot对象
+                let protocol = NetProtocol{instance:NetControl::WSProtocol(Arc::new(ws))};
+                Ok(Bot{id,protocol,tx_pool:Arc::new(DashMap::new()), events: Arc::new(DashMap::new()) })
+            }
+            ProtocolType::ReserverWebSocket(port,token) => {todo!()}
+            ProtocolType::Http(url,token) => {
+                let url = if url.trim().starts_with("http://"){url}else{format!("http://{}",url.trim())};
+                todo!()
+            }
+            ProtocolType::ReserverHttp(port,token) => {todo!()}
+        }
+    }
+}
+
+/*
 pub enum EventResolve<B:BotAPI> {
     LifecycleEvent(fn(&mut B,LifecycleEvent)),
     HeartbeatEvent(fn(&mut B,HeartbeatEvent)),
@@ -30,7 +242,6 @@ impl<B:Bot> Default for Subscribes<B> {
         }
     }
 }
-
 /// 公开API
 pub trait BotAPI where Self:Sized{
     /// 启动一个新线程运行bot
@@ -121,25 +332,27 @@ pub trait BotAPI where Self:Sized{
     /// 获取登录状态
     fn get_status(&mut self) -> Result<EchoGetStatus, Error>;
     /// 获取协议端版本信息
-    fn get_version_info(&mut self)->Result<EchoGetVersionInfo, Error>;
+    fn get_version_info(self)->Result<EchoGetVersionInfo, Error>;
     /// 重启协议端
     fn set_restart(&mut self,delay:i64)->Result<EchoStatus, Error>;
-}
-
+    
+}*/
+/* 
 /// Bot底层功能
 #[allow(async_fn_in_trait,unused)]
-pub(crate) trait Bot where Self:BotAPI{
+pub(crate) trait Bot : Send + Sync where Self:BotAPI{
     //fn run_async(self) -> AbortHandle;
     /// 向协议端发送消息
-    fn send(&mut self,string:&String)->Result<(),Error>;
+    async fn send(&mut self,string:&String)->Result<(),Error>;
     /// 向协议端发送消息并接收返回消息
-    fn send_with_recive(&mut self,string:&String)->Result<String,Error>;
+    async fn send_with_recive(&mut self,string:&String)->Result<String,Error>;
     /// 向协议端异步发送消息
-    async fn send_async(&mut self,string:&String)->Result<(),Error>;
+    //async fn send_async(&mut self,string:&String)->Result<(),Error>;
     /// 向协议端异步发送消息并接收返回消息
-    async fn send_with_recive_async(&mut self,string:&String)->Result<String,Error>;
+    //async fn send_with_recive_async(&mut self,string:&String)->Result<String,Error>;
     /// 从协议端接收消息
-    fn recv_msg(&self)->Result<String,Error>;
+    async fn recv_msg<F: Fn(&str) -> bool + Send + 'static>(&self,check:F)->Result<String>;
+    async fn recv_msg_with_echo(&self,echo:String)->Result<String>;
 }
 
 pub(crate) fn send_private_msg<B:Bot,T:Display>(bot:&mut B,id:&i64,s:T)->Result<EchoStatus, Error>{
@@ -328,8 +541,8 @@ pub(crate) fn get_status<B:Bot>(bot:&mut B)->Result<EchoGetStatus, Error>{
     let res = bot.send_with_recive(&format!("{{\"action\": \"get_status\"}}")).with_context(||"获取登录状态:发送失败")?;
     Ok(serde_json::from_value::<EchoGetStatus>(serde_json::from_str::<EchoEvent>(res.as_str())?.data).with_context(||"获取登录状态:解析失败")?)
 }
-pub(crate) fn get_version_info<B:Bot>(bot:&mut B)->Result<EchoGetVersionInfo, Error>{
-    let res = bot.send_with_recive(&format!("{{\"action\": \"get_version_info\"}}")).with_context(||"获取协议端版本信息:发送失败")?;
+pub(crate) async fn get_version_info<B:Bot + Send + Sync>(bot:Arc<Mutex<B>>)->Result<EchoGetVersionInfo, Error>{
+    let res= bot.lock().await.send_with_recive(&format!("{{\"action\": \"get_version_info\"}}")).await.with_context(||"获取协议端版本信息:发送失败")?;
     Ok(serde_json::from_value::<EchoGetVersionInfo>(serde_json::from_str::<EchoEvent>(res.as_str())?.data).with_context(||"获取协议端版本信息:解析失败")?)
 }
 pub(crate) fn clean_cache<B:Bot>(bot:&mut B)->Result<EchoStatus, Error>{
@@ -348,3 +561,4 @@ pub(crate) fn set_restart<B:Bot>(bot:&mut B,delay:i64)->Result<EchoStatus, Error
     }
     Err(Error::msg("重启协议端失败"))
 }
+*/

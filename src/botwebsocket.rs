@@ -1,19 +1,12 @@
-use std::{fmt::Display, net::TcpStream, str::FromStr, sync::{Arc, Mutex}, thread::{self, JoinHandle}};
+use std::{io::{Read, Write}, net::TcpStream, sync::Arc};
 
-use tungstenite::{http::Uri, stream::MaybeTlsStream, Message, WebSocket};
-use anyhow::{Context, Error};
-use crate::{bot::*, event::*, funs::*};
+use async_trait::async_trait;
+use tokio::sync::Mutex;
+use tungstenite::{stream::MaybeTlsStream, WebSocket};
+use anyhow::Error;
+use crate::bot::*;
 
-type WS=Arc<Mutex<WebSocket<MaybeTlsStream<TcpStream>>>>;
-
-///正向WebSocket连接
-pub struct BotWebsocket{
-    url:String,
-    id:i64,
-    ws:WS,
-    subscribes:Subscribes<Self>
-}
-
+/*
 impl BotWebsocket{
     ///通过正向ws连接协议端
     pub fn new<T:Display>(url:T,token:&str)->Result<BotWebsocket,Error>{
@@ -25,7 +18,7 @@ impl BotWebsocket{
         Ok(BotWebsocket{
             url:url.to_string(),
             id: lifecycle_event.self_id,
-            ws: Arc::new(Mutex::new(ws)),
+            ws: Mutex::new(ws),
             subscribes:Subscribes::<Self>::default()
         })
     }
@@ -38,65 +31,90 @@ impl BotWebsocket{
 }
 
 impl Bot for BotWebsocket {
-    fn send(&mut self,string:&String)->Result<(),Error> {
-        printinf(format!("Send: {}",string));
-        Ok(self.ws.lock().unwrap().send(Message::text(string))?)
+    async fn recv_msg<F>(&self,check: F,) -> Result<String,Error>where F: Fn(&str) -> bool + Send + 'static,{
+        loop{
+            let msg = self.ws.lock().await.read().unwrap().into_text().unwrap().to_string();
+            if check(msg.as_str()){return Ok(msg)}
+        }
     }
-    fn send_with_recive(&mut self,string:&String)->Result<String,Error> {
-        self.send(string)?;
-        Ok(self.recv_msg()?)
+    async fn recv_msg_with_echo(&self,echo:String) -> Result<String,Error>{
+        self.recv_msg(move |v|{
+            match serde_json::from_str::<Echo>(v) {
+                Ok(msgecho) => {
+                    if echo.to_string()==msgecho.echo{
+                        return true
+                    }else{false}
+                },
+                Err(_) => false,
+            }
+        }).await
+    } 
+    async fn send(&mut self,string:&String)->anyhow::Result<(),Error> {
+        match self.ws.lock().await.send(tungstenite::Message::Text(string.into())){
+            std::result::Result::Ok(_) => Ok(()),
+            Err(_) => Err(Error::msg(format!("向协议端发送消息:{}失败",string))),
+        }
     }
-    async fn send_async(&mut self,string:&String)->Result<(),Error> {
-        Ok(self.ws.lock().unwrap().send(Message::text(string))?)
+    
+    async fn send_with_recive(&mut self,string:&String)->anyhow::Result<String,Error> {
+        let echo:i64 = random();
+        match self.send(string).await {
+            Ok(_) => {
+                let result = self.recv_msg_with_echo(echo.to_string()).await.unwrap();
+                Ok(result)
+            },
+            Err(err) => {Err(err)},
+        }
     }
-    async fn send_with_recive_async(&mut self,string:&String)->Result<String,Error> {
-        self.ws.lock().unwrap().send(Message::text(string))?;
-        Ok(self.recv_msg()?)
-    }
-    fn recv_msg(&self)->Result<String,Error>{
-        let s = self.ws.lock().unwrap().read()?.to_string();
-        Ok(s)
-    }
+    
 }
 
 impl BotAPI for BotWebsocket {
     fn run(self) -> JoinHandle<()> {
-        let mut bot = self;
-        thread::spawn(move ||{
+        let bot = Arc::new(Mutex::new(self));
+        tokio::spawn(async move {
             loop{
-                match bot.recv_msg(){
+                let msg = {
+                    let locked_bot = bot.lock().await;
+                    locked_bot.recv_msg(|_| true).await
+                };
+                match msg{
                 Ok(str) => {
-                    match Event::from(&str) {
-                        Ok(Event::LifecycleEvent{event}) => {
-                            if let Some(f) = bot.subscribes.lifecycle_event{
-                                f(&mut bot,event)
+                    let bot_clone = Arc::clone(&bot);
+                    tokio::spawn(async move {
+                        let mut locked_bot = bot_clone.lock().await;
+                        match Event::from(&str) {
+                            Ok(Event::LifecycleEvent{event}) => {
+                                if let Some(f) = &mut locked_bot.subscribes.lifecycle_event{
+                                    f(&mut locked_bot,event)
+                                }
                             }
-                        }
-                        Ok(Event::HeartbeatEvent{event}) => {
-                            if let Some(f) = bot.subscribes.heartbeat_event{
-                                f(&mut bot,event)
+                            Ok(Event::HeartbeatEvent{event}) => {
+                                if let Some(f) = &mut locked_bot.subscribes.heartbeat_event{
+                                f(&mut locked_bot,event)
                             }
-                        }
-                        Ok(Event::GroupMsgEvent{event}) => {
-                            if let Some(f) = bot.subscribes.group_msg_event{
-                                f(&mut bot,event)
                             }
-                        }
-                        Ok(Event::PrivateMsgEvent{event}) => {
-                            if let Some(f) = bot.subscribes.private_msg_event{
-                                f(&mut bot,event)
+                            Ok(Event::GroupMsgEvent{event}) => {
+                                if let Some(f) = &mut locked_bot.subscribes.group_msg_event{
+                                    f(&mut locked_bot,event)
+                                }
                             }
-                        }
-                        Ok(Event::GroupRecall { event }) => {
-                            if let Some(f) = bot.subscribes.group_recall{
-                                f(&mut bot,event)
+                            Ok(Event::PrivateMsgEvent{event}) => {
+                                if let Some(f) = &mut locked_bot.subscribes.private_msg_event{
+                                    f(&mut locked_bot,event)
+                                }
                             }
-                        }
-                        Err(err) => {
-                            printerr(err);
-                            printerr(str)
-                        }
-                    }
+                            Ok(Event::GroupRecall { event }) => {
+                                if let Some(f) = &mut locked_bot.subscribes.group_recall{
+                                    f(&mut locked_bot,event)
+                                }
+                            }
+                            Err(err) => {
+                                printerr(err);
+                                printerr(str)
+                            }
+                };
+                    });
                 },
                 Err(err) => printerr(err)
                 }
@@ -112,9 +130,20 @@ impl BotAPI for BotWebsocket {
             EventResolve::GroupRecall(f) => self.subscribes.group_recall=Some(f)
         }
     }
+    
+    fn get_version_info(self)->anyhow::Result<EchoGetVersionInfo, Error> {
+        todo!()
+    }
+    /*
     fn send_private_msg<T:Display>(&mut self,id:&i64,s:T)->Result<EchoStatus,Error>{send_private_msg(self, id, s)}
     fn get_status(&mut self)->Result<EchoGetStatus, Error>{get_status(self)}
-    fn get_version_info(&mut self)->Result<EchoGetVersionInfo, Error>{get_version_info(self)}
+    fn get_version_info(&mut self)->Result<EchoGetVersionInfo, Error>{
+        let rt = Runtime::new().unwrap();
+        let bot = Arc::new(Mutex::new(self));
+        rt.block_on(async {
+            get_version_info(bot).await
+        })
+    }
     fn get_login_info(&mut self)->Result<EchoLoginInfo, Error>{get_login_info(self)}
     fn send_group_msg<T:Display>(&mut self,group_id:&i64,s:T)->Result<EchoStatus,Error> {send_group_msg(self, group_id, s)}
     fn delete_msg(&mut self,msg_id:&i64)->Result<EchoStatus,Error> {delete_msg(self, msg_id)}
@@ -146,5 +175,6 @@ impl BotAPI for BotWebsocket {
     fn get_image<T:Display>(&mut self,file:&T)->Result<EchoEvent, Error> {get_image(self, file)}
     fn can_send_image(&mut self)->Result<EchoEvent, Error> {can_send_image(self)}
     fn can_send_record(&mut self)->Result<EchoEvent, Error> {can_send_record(self)}
-    fn set_restart(&mut self,delay:i64)->Result<EchoStatus, Error> {set_restart(self, delay)}
+    fn set_restart(&mut self,delay:i64)->Result<EchoStatus, Error> {set_restart(self, delay)}*/
 }
+*/
