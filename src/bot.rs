@@ -1,41 +1,40 @@
-use std::{fmt::Debug, future::Future, pin::Pin, sync::Arc};
-use async_trait::async_trait;
-use dashmap::DashMap;
-use serde_json::Value;
-use tokio::{runtime::Handle, sync::{mpsc::{self, Receiver, Sender}, Mutex}, task::block_in_place};
-use tungstenite::ClientRequestBuilder;
-use crate::{event::{self, *}, funs::{printinf, printwrm}, message::Message, protocol::{NetControl, NetProtocol, ProtocolType}};
-use anyhow::{Error, Result};
 
+use std::{sync::Arc, thread};
+
+use crate::{event::*, protocol::ProtocolType};
+
+use dashmap::DashMap;
+use futures::{SinkExt, StreamExt};
+use parking_lot::{Condvar, Mutex};
+use serde_json::Value;
+use smol::channel::{Receiver, Sender};
+use anyhow::{Error, Result};
+use async_tungstenite::{async_std::connect_async, tungstenite};
+
+#[derive(Debug)]
 pub struct Bot{
     pub id:i64,
-    protocol:NetProtocol,
-    tx_pool:Arc<DashMap<u16,Sender<Event>>>,
-    events:Arc<DashMap<u16,Box<dyn Fn(event::Event) -> Pin<Box<dyn Future<Output = ()>+ Send>>+ Send>>>
-}
-
-impl Debug for Bot {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Bot").field("id", &self.id).field("protocol", &self.protocol).field("tx_pool", &self.tx_pool).finish()
-    }
+    sender:Sender<String>,
+    echo_pool:Arc<DashMap<u16,(Arc<Mutex<Option<Event>>>,Arc<Condvar>)>>,
+    event_rx:Receiver<String>
 }
 
 impl Clone for Bot {
-    /// 克隆一个Bot对象,克隆的对象拥有除事件订阅以外所有原对象相同的数据
+    /// 克隆一个Bot对象
     fn clone(&self) -> Self {
-        Self { id: self.id.clone(), protocol: self.protocol.clone(), tx_pool: self.tx_pool.clone(), events: Arc::new(DashMap::new()) }
+        Self { id: self.id.clone(),
+            sender: self.sender.clone(),
+            echo_pool: self.echo_pool.clone(),
+            event_rx:self.event_rx.clone()
+        }
     }
 }
 
-/// Bot基础功能
-#[async_trait]
+/// onebot v11 Bot基础功能
 pub trait BaseBot {
-    /// 发送群聊消息
-    async fn send_group_msg(&self,group_id:&i64,s:Message)->Result<EchoStatus,Error>;
-    /// 获取登录账号信息
-    async fn get_login_info(&self)->Result<EchoLoginInfo, Error>;
     /// 获取协议端版本信息
-    async fn get_version_info(&self)->Result<EchoGetVersionInfo, Error>;
+    fn get_version_info(&self)->Result<EchoGetVersionInfo, Error>;
+    fn send_group_msg(&mut self,group_id:&i64,s:String)->Result<EchoStatus,Error>;
 }
 
 #[allow(non_camel_case_types)]
@@ -44,63 +43,33 @@ pub trait napcatBot {
     
 }
 
-#[async_trait]
 impl BaseBot for Bot {
-    async fn send_group_msg(&self,group_id:&i64,msg:Message)->Result<EchoStatus,Error>{
+    fn get_version_info(&self) -> Result<EchoGetVersionInfo,Error>{
         let random_echo = random_echo(self);
-        let mut rx = push_echo(self,random_echo)?;
-        self.protocol.send(format!("{{\"action\": \"send_group_msg\",\"params\": {{\"group_id\":{group_id},\"message\":{msg}}},\"echo\":{random_echo}}}")).await?;
-        let e = rx.recv().await.unwrap();
-        match e {
+        let event = push_echo(&self,random_echo,format!("{{\"action\": \"get_version_info\",\"echo\":{random_echo}}}"));
+        
+        match event {
             Event::EchoEvent { event } => {
-                if event.status=="failed"&&event.echo==random_echo{
-                    return Err(Error::msg(event.message.clone()));
-                }else if event.echo==random_echo{
-                    return Ok(serde_json::from_value::<EchoStatus>(event.data.clone())?);
-                }
-                Ok(serde_json::from_value::<EchoStatus>(event.data)?)
+                let r = serde_json::from_value::<EchoGetVersionInfo>(event.data)?;
+                return Ok(r);
             },
-            _=>{
-                Err(Error::msg("接收到一个错误的事件类型"))
-            }
+            Event::Error { msg } => return Err(Error::msg(msg)),
+            Event::Msg { msg } => return Err(Error::msg(msg)),
+            _ => {return Err(Error::msg(format!("错误的事件类型:{:?}",event)))}
         }
     }
-    async fn get_login_info(&self)->Result<EchoLoginInfo, Error>{
+    fn send_group_msg(&mut self,group_id:&i64,s:String)->Result<EchoStatus,Error> {
         let random_echo = random_echo(self);
-        let mut rx = push_echo(self,random_echo)?;
-        self.protocol.send(format!("{{\"action\": \"get_version_info\",\"echo\":{random_echo}}}")).await?;
-        let e = rx.recv().await.unwrap();
-        match e {
+        let event = push_echo(&self,random_echo,format!("{{\"action\": \"send_group_msg\",\"params\": {{\"group_id\":{group_id},\"message\":{s}}},\"echo\":{random_echo}}}"));
+        
+        match event {
             Event::EchoEvent { event } => {
-                if event.status=="failed"&&event.echo==random_echo{
-                    return Err(Error::msg(event.message.clone()));
-                }else if event.echo==random_echo{
-                    return Ok(serde_json::from_value::<EchoLoginInfo>(event.data.clone())?);
-                }
-                Ok(serde_json::from_value::<EchoLoginInfo>(event.data)?)
+                let r = serde_json::from_value::<EchoStatus>(event.data)?;
+                return Ok(r);
             },
-            _=>{
-                Err(Error::msg("接收到一个错误的事件类型"))
-            }
-        }
-    }
-    async fn get_version_info(&self) -> Result<EchoGetVersionInfo,Error>{
-        let random_echo = random_echo(self);
-        let mut rx = push_echo(self,random_echo)?;
-        self.protocol.send(format!("{{\"action\": \"get_version_info\",\"echo\":{random_echo}}}")).await?;
-        let e = rx.recv().await.unwrap();
-        match e {
-            Event::EchoEvent { event } => {
-                if event.status=="failed"&&event.echo==random_echo{
-                    return Err(Error::msg(event.message.clone()));
-                }else if event.echo==random_echo{
-                    return Ok(serde_json::from_value::<EchoGetVersionInfo>(event.data.clone())?);
-                }
-                Ok(serde_json::from_value::<EchoGetVersionInfo>(event.data)?)
-            },
-            _=>{
-                Err(Error::msg("接收到一个错误的事件类型"))
-            }
+            Event::Error { msg } => return Err(Error::msg(msg)),
+            Event::Msg { msg } => return Err(Error::msg(msg)),
+            _ => {return Err(Error::msg(format!("错误的事件类型:{:?}",event)))}
         }
     }
 }
@@ -108,7 +77,7 @@ impl BaseBot for Bot {
 fn random_echo(bot:&Bot)->u16{
     let mut random_echo = rand::random::<u16>();
     loop{
-        if bot.tx_pool.contains_key(&random_echo){
+        if bot.echo_pool.contains_key(&random_echo){
             random_echo = rand::random::<u16>();
             continue;
         }else {
@@ -118,91 +87,106 @@ fn random_echo(bot:&Bot)->u16{
     random_echo
 }
 
-fn push_echo(bot:&Bot,random_echo:u16)->Result<Receiver<Event>,Error>{
-    let (tx,rx) = mpsc::channel::<Event>(50);
-    bot.subscribe_echo(random_echo, tx)?;
-    Ok(rx)
+fn push_echo(bot:&Bot,echo:u16,msg:String)->Event{
+    let event:Arc<Mutex<Option<Event>>> = Arc::new(Mutex::new(None));
+    let cond = Arc::new(Condvar::new());
+    let _ = bot.subscribe_echo(echo,event.clone(),cond.clone());
+    let _ = bot.sender.try_send(msg).unwrap();
+    let mut event_lock = event.lock();
+    cond.wait(&mut event_lock);
+    event_lock.take().unwrap()
 }
 
 impl Bot {
-    /// 运行Bot事件推送功能
-    pub fn run(self) -> tokio::task::JoinHandle<()> {
-        loop{
-            let mut r;
-            block_in_place(||
-                Handle::current().block_on(async move {
-                    r = self.protocol.recv().await
-                })
-            );
-            match r {
-                Ok(s) => {
-                    match Event::from(&s){
-                        Ok(e) => {
-                            match e {
-                                Event::LifecycleEvent { event } => {
-                                    printinf(format!("{event:?}"));
-                                }
-                                Event::HeartbeatEvent { event } => {
-                                    printinf(format!("{event:?}"));
-                                }
-                                Event::GroupMsgEvent { event } => {
-                                    printinf(format!("{event:?}"));
-                                }
-                                Event::PrivateMsgEvent { event } => {
-                                    printinf(format!("{event:?}"));
-                                }
-                                Event::GroupRecall { event } => {
-                                    printinf(format!("{event:?}"));
-                                }
-                                Event::EchoEvent { event }=> {
-                                    if let Some((_,tx)) = self.tx_pool.remove(&event.echo){
-                                        tx.blocking_send(event::Event::EchoEvent { event }).unwrap();
-                                    }else{
-                                        printwrm(format!("未找到echo为{}的发送者",&event.echo));
-                                    }
-                                }
-                            }
-                        },
-                        Err(err) => {
-                            printwrm(err);
-                        },
-                    }
-                },
-                Err(err) => {
-                    printwrm(err);
-                    continue;
-                },
-            }
-        }
+
+    pub fn iter(&self)->BotIter{
+        BotIter { event_rx: self.event_rx.clone() }
     }
-    fn subscribe_echo(&self,echo:u16,tx:Sender<Event>)->Result<(),Error>{
-        self.tx_pool.insert(echo, tx);
+
+    fn subscribe_echo(&self,echo:u16,event:Arc<Mutex<Option<Event>>>,cond:Arc<Condvar>)->Result<(),Error>{
+        self.echo_pool.insert(echo, (event,cond));
         Ok(())
     }
-    pub fn subscribe(&self,event:Event,fun:Box<dyn Fn(Event) -> Pin<Box<dyn Future<Output = ()>>>>){
-        self.events.insert("1", fun);
-    }
+
     /// 创建Bot
     /// 
     /// 传入[crate::protocol::ProtocolType]来控制协议类型
-    pub async fn new(protocol_type:ProtocolType)->Result<Bot>{
+    /// ```rust
+    /// Bot::new(ProtocolType::WebSocket("127.0.0.1:3001".to_string(),"114514".to_string())
+    /// ```
+    pub fn new(protocol_type:ProtocolType)->Result<Bot>{
         match protocol_type {
             ProtocolType::WebSocket(url,token) => {
                 let url = if url.trim().starts_with("ws://"){url}else{format!("ws://{}",url.trim())};// 补全地址
-                let b = ClientRequestBuilder::new(url.parse()?);
+                let b = tungstenite::ClientRequestBuilder::new(url.parse()?);
                 let builder = if !token.trim().eq(""){b.with_header("Authorization", format!("Bearer {token}"))}else{b};//添加鉴权请求头
-                let ws = Mutex::new(tungstenite::connect(builder)?.0);
+                let (ws,_) = smol::block_on(async{
+                    connect_async(builder).await
+                })?;
+                
+                let (mut ws_writer,mut ws_reader) = ws.split();
+                let echo_pool:Arc<DashMap<u16,(Arc<Mutex<Option<Event>>>,Arc<Condvar>)>> = Arc::new(DashMap::new());
+                let echo_pool_clone = echo_pool.clone();
 
                 //判断是否连接成功
-                let status:Value = serde_json::from_str(ws.lock().await.read()?.into_text()?.to_string().as_str())?;
-                if status.get("status")==Some(&Value::from("failed")){
-                    return Err(Error::msg(status.get("message").unwrap().clone()))
-                };
-                let id = status.get("self_id").unwrap().as_i64().unwrap();
+                let msg = smol::block_on(async{ws_reader.next().await});
+                if let Some(Ok(msg)) = msg{
+                    let status:Value = serde_json::from_str(msg.to_text()?)?;
+                    if status.get("status")==Some(&Value::from("failed")){
+                        return Err(Error::msg(status.get("message").unwrap().to_string()))
+                    };
+                    let id = status.get("self_id").unwrap().as_i64().unwrap();
 
-                //包装Bot对象
-                let protocol = NetProtocol{instance:NetControl::WSProtocol(Arc::new(ws))};
-                Ok(Bot{id,protocol,tx_pool:Arc::new(DashMap::new()), events: Arc::new(DashMap::new()) })
+                    // 网络消息发送/接收管道
+                    let (msg_sender,msg_recver) = smol::channel::unbounded::<String>();
+
+                    // 事件发送/接收管道
+                    let (event_sender,event_recver) = smol::channel::unbounded::<String>();
+
+                    // 网络消息接收
+                    thread::spawn(move||smol::block_on(async move{
+                        while let Some(Ok(s)) = ws_reader.next().await {
+                            if let Ok(e) = Event::from(&s.to_string()){
+                                match &e {
+                                    Event::EchoEvent { event } => {
+                                        if echo_pool_clone.contains_key(&event.echo){
+                                            if let Some((_,(event,cond))) = echo_pool_clone.remove(&event.echo){
+                                                *event.lock() = Some(e);
+                                                cond.notify_one();
+                                                continue;
+                                            };
+                                        }
+                                    },
+                                    _=>{
+                                        // 将事件推送至事件队列
+                                        let _ = event_sender.send(s.to_string()).await;
+                                    }
+                                }
+                            }
+                        }
+                    }));
+
+                    // 网络消息发送
+                    thread::spawn(move||smol::block_on(async move{
+                        loop {
+                            if let Ok(msg) = msg_recver.recv().await{
+                                let _ = ws_writer.send(tungstenite::Message::Text(msg.into())).await;
+                                let _ = ws_writer.flush().await;
+                            };
+                        }
+                    }));
+
+                    //包装Bot对象
+                    return Ok(Bot{
+                        id,
+                        sender:msg_sender,
+                        echo_pool,
+                        event_rx:event_recver,
+
+                    })
+                }else {
+                    return Err(Error::msg("连接失败"));
+                };
             }
             ProtocolType::ReserverWebSocket(port,token) => {todo!()}
             ProtocolType::Http(url,token) => {
@@ -213,6 +197,25 @@ impl Bot {
         }
     }
 }
+
+pub struct BotIter{
+    event_rx:Receiver<String>
+}
+
+impl Iterator for BotIter {
+    type Item = Event;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let s = self.event_rx.recv_blocking().unwrap();
+        if let Ok(e) = Event::from(&s){
+            Some(e)
+        }
+        else {
+            None
+        }
+    }
+}
+
 
 /*
 pub enum EventResolve<B:BotAPI> {

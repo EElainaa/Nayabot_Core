@@ -34,7 +34,6 @@ pub struct Mface{//表情包
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct At{
-    pub name:String,
     pub qq:String
 }
 
